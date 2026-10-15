@@ -118,6 +118,7 @@ typedef struct {
     DXGI_FORMAT format;
     ID3D11RenderTargetView* render_target;
     ID3D11ShaderResourceView* view;
+    ID3D11ShaderResourceView* presentation_view;
 } NativeGpuSurface;
 
 typedef struct {
@@ -596,6 +597,7 @@ static void native_gpu_release_surface(NativeGpuSurface* surface) {
     if (!surface)
         return;
     NATIVE_RELEASE(surface->readback_texture);
+    NATIVE_RELEASE(surface->presentation_view);
     NATIVE_RELEASE(surface->view);
     NATIVE_RELEASE(surface->render_target);
     NATIVE_RELEASE(surface->texture);
@@ -670,7 +672,8 @@ static NativeGpuSurface* native_gpu_ensure_surface_format(uint32_t key,
     desc.Height = height;
     desc.MipLevels = 1u;
     desc.ArraySize = 1u;
-    desc.Format = format;
+    bool srgb=format==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+    desc.Format = srgb?DXGI_FORMAT_B8G8R8A8_TYPELESS:format;
     desc.SampleDesc.Count = 1u;
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
@@ -678,16 +681,28 @@ static NativeGpuSurface* native_gpu_ensure_surface_format(uint32_t key,
                                                     &replacement->texture);
     if (FAILED(result))
         goto failed;
+    D3D11_RENDER_TARGET_VIEW_DESC rtv={0};
+    rtv.Format=format;rtv.ViewDimension=D3D11_RTV_DIMENSION_TEXTURE2D;
     result = ID3D11Device_CreateRenderTargetView(
-        g_d3d_device, (ID3D11Resource*)replacement->texture, NULL,
+        g_d3d_device, (ID3D11Resource*)replacement->texture, &rtv,
         &replacement->render_target);
     if (FAILED(result))
         goto failed;
+    D3D11_SHADER_RESOURCE_VIEW_DESC srv={0};
+    srv.Format=format;srv.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;srv.Texture2D.MipLevels=1;
     result = ID3D11Device_CreateShaderResourceView(
-        g_d3d_device, (ID3D11Resource*)replacement->texture, NULL,
+        g_d3d_device, (ID3D11Resource*)replacement->texture, &srv,
         &replacement->view);
     if (FAILED(result))
         goto failed;
+    if(srgb) {
+        /* Scanout displays stored sRGB bytes; sampling for another guest draw
+           uses the linearizing view above. Avoid decoding twice on screen. */
+        srv.Format=DXGI_FORMAT_B8G8R8A8_UNORM;
+        result=ID3D11Device_CreateShaderResourceView(g_d3d_device,
+            (ID3D11Resource*)replacement->texture,&srv,&replacement->presentation_view);
+        if(FAILED(result))goto failed;
+    }
     replacement->valid = true;
     replacement->key = key;
     replacement->width = width;
@@ -706,6 +721,7 @@ static NativeGpuSurface* native_gpu_ensure_surface(uint32_t key,uint32_t width,u
 bool wiiu_window_gpu_configure(uint32_t key,uint32_t width,uint32_t height,uint32_t format) {
     DXGI_FORMAT native;
     switch(format) {
+    case 0x41a:native=DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;break;
     case 0x806:native=DXGI_FORMAT_R16_FLOAT;break;
     case 0x810:native=DXGI_FORMAT_R16G16_FLOAT;break;
     case 0x820:native=DXGI_FORMAT_R16G16B16A16_FLOAT;break;
@@ -1697,7 +1713,8 @@ static bool native_draw_postprocess(uint32_t target_key,uint32_t width,
         view=source->view;
     } else {
         if(!pixels) return false;
-        NativeGpuTexture* texture=native_gpu_ensure_texture(pixels,texture_width,texture_height,texture_serial);
+        NativeGpuTexture* texture=native_gpu_ensure_texture_kind(pixels,texture_width,texture_height,
+            texture_serial,textures && textures[0].floating_pixels);
         if(!texture) return false;
         view=texture->view;
     }
@@ -1706,7 +1723,8 @@ static bool native_draw_postprocess(uint32_t target_key,uint32_t width,
     for(unsigned i=0;i<extra;++i) {
         if(!textures || !textures[i+1].pixels) return false;
         const WiiUWindowEffectTexture* input=&textures[i+1];
-        NativeGpuTexture* texture=native_gpu_ensure_texture(input->pixels,input->width,input->height,input->serial);
+        NativeGpuTexture* texture=native_gpu_ensure_texture_kind(input->pixels,input->width,input->height,
+            input->serial,input->floating_pixels);
         if(!texture) return false;
         views[i+1]=texture->view;
     }
@@ -2065,7 +2083,10 @@ static bool native_gpu_readback(uint32_t surface_key, uint8_t* pixels,
         for(uint32_t x=0;x<width;++x) {
             float rgba[4]={0,0,0,1};
             if(!channels){rgba[0]=row[x*4+2]/255.0f;rgba[1]=row[x*4+1]/255.0f;
-                rgba[2]=row[x*4]/255.0f;rgba[3]=row[x*4+3]/255.0f;}
+                rgba[2]=row[x*4]/255.0f;rgba[3]=row[x*4+3]/255.0f;
+                if(surface->format==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB)
+                    for(unsigned c=0;c<3;++c)rgba[c]=rgba[c]<=.04045f?rgba[c]/12.92f:
+                        powf((rgba[c]+.055f)/1.055f,2.4f);}
             else if(!bytes) {
                 uint32_t packed;memcpy(&packed,row+x*4,4);
                 rgba[0]=native_half_to_float((uint16_t)((packed&2047)<<4));
@@ -2096,6 +2117,27 @@ bool wiiu_window_gpu_readback_float(uint32_t key,float* pixels,uint32_t width,ui
     return native_gpu_readback(key,(uint8_t*)pixels,width,height,width*16,true);
 }
 
+bool wiiu_window_gpu_scanout(uint32_t source_key,uint32_t width,uint32_t height,
+                             bool srgb,uint32_t* output) {
+    NativeGpuSurface* source=native_gpu_find_surface(source_key);
+    if(!source || !source->contents_valid || !output)return false;
+    if(!srgb && source->format!=DXGI_FORMAT_B8G8R8A8_UNORM_SRGB) {
+        *output=source_key;return true;
+    }
+    /* This key is outside the mapped guest address ranges. Scanout samples
+       in linear space, then writes the TV's requested encoding exactly once. */
+    const uint32_t scanout=0xfffffffeu;
+    if(source_key==scanout ||
+       !wiiu_window_gpu_configure(scanout,width,height,srgb?0x41a:0x1a) ||
+       !wiiu_window_gpu_clear(scanout,width,height,0,0,0,255))return false;
+    WiiUWindowGpuVertex quad[4]={
+        {0,0,0,0,255,255,255,255},{(float)width,0,1,0,255,255,255,255},
+        {(float)width,(float)height,1,1,255,255,255,255},{0,(float)height,0,1,255,255,255,255}};
+    WiiUWindowGpuBlendControl replace={true,1,0,0,true,1,0,0};
+    if(!wiiu_window_gpu_draw_surface(scanout,width,height,source_key,quad,&replace,false,0,0,0,0))return false;
+    *output=scanout;return true;
+}
+
 bool wiiu_window_gpu_present(uint32_t surface_key, uint32_t width,
                              uint32_t height) {
     NativeGpuSurface* surface = native_gpu_find_surface(surface_key);
@@ -2110,7 +2152,8 @@ bool wiiu_window_gpu_present(uint32_t surface_key, uint32_t width,
     g_has_frame = true;
     accept_detailed_frame();
     wiiu_window_show("GX2SwapScanBuffers");
-    if (!native_presenter_present(surface->view, 0.0f, 0.0f, 0.0f))
+    if (!native_presenter_present(surface->presentation_view?surface->presentation_view:surface->view,
+                                  0.0f, 0.0f, 0.0f))
         return false;
     g_has_pixels = true;
     surface->use_serial = ++g_native_gpu_use_serial;
@@ -2804,6 +2847,11 @@ bool wiiu_window_gpu_readback(uint32_t surface, uint8_t* pixels,
     (void)height;
     (void)stride;
     return false;
+}
+
+bool wiiu_window_gpu_scanout(uint32_t source,uint32_t width,uint32_t height,
+                             bool srgb,uint32_t* output) {
+    (void)source;(void)width;(void)height;(void)srgb;(void)output;return false;
 }
 
 bool wiiu_window_gpu_present(uint32_t surface, uint32_t width,

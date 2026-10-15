@@ -30,6 +30,48 @@ int main(void) {
     }
     float viewport[4]={0,0,8,8};
     WiiUWindowGpuBlendControl blend={true,1,0,0,true,1,0,0};
+    /* Exercise the real GPU sRGB write, sample, and blend operations. Linear
+       0.5 must be stored near byte 188, not byte 128; alpha stays linear. */
+    CHECK(wiiu_window_gpu_configure(source,4,4,0x41a));
+    CHECK(wiiu_window_gpu_configure(target,8,8,0x41a));
+    const float middle[4]={.5f,.25f,.125f,.5f};
+    CHECK(wiiu_window_gpu_clear_float(source,4,4,middle));
+    for(unsigned i=0;i<3;++i)v[i].parameters[0][0]=v[i].parameters[0][1]=.5f;
+    CHECK(wiiu_window_gpu_clear(target,8,8,0,0,0,0));
+    CHECK(wiiu_window_gpu_draw_postprocess(target,8,8,source,NULL,4,4,0,v,3,
+        0,0x00010203,viewport,&blend,false,0,0,0,0));
+    CHECK(wiiu_window_gpu_readback(target,pixels,8,8,32));
+    CHECK(abs((int)pixels[2]-188)<=1 && abs((int)pixels[1]-137)<=1 &&
+          abs((int)pixels[0]-99)<=1 && abs((int)pixels[3]-128)<=1);
+    float linear_color[8*8*4];
+    CHECK(wiiu_window_gpu_readback_float(target,linear_color,8,8));
+    CHECK(fabsf(linear_color[0]-.5f)<.006f && fabsf(linear_color[3]-.5f)<.003f);
+    CHECK(wiiu_window_gpu_configure(target,8,8,0x1a));
+    CHECK(wiiu_window_gpu_clear(target,8,8,0,0,0,0));
+    CHECK(wiiu_window_gpu_draw_postprocess(target,8,8,source,NULL,4,4,0,v,3,
+        0,0x00010203,viewport,&blend,false,0,0,0,0));
+    CHECK(wiiu_window_gpu_readback(target,pixels,8,8,32));
+    CHECK(abs((int)pixels[2]-128)<=1 && abs((int)pixels[3]-128)<=1);
+    /* The scan-buffer format is independent of the render-target format.
+       BOTW presents its linear 0x19 target to an sRGB TV scan buffer. */
+    uint32_t scanout=0;
+    CHECK(wiiu_window_gpu_scanout(target,8,8,true,&scanout));
+    CHECK(wiiu_window_gpu_readback(scanout,pixels,8,8,32));
+    CHECK(abs((int)pixels[2]-188)<=1 && abs((int)pixels[3]-128)<=1);
+    CHECK(wiiu_window_gpu_scanout(source,4,4,true,&scanout));
+    CHECK(wiiu_window_gpu_readback(scanout,pixels,4,4,16));
+    CHECK(abs((int)pixels[2]-188)<=1); /* sRGB -> sRGB, encoded only once */
+    CHECK(wiiu_window_gpu_scanout(source,4,4,false,&scanout));
+    CHECK(wiiu_window_gpu_readback(scanout,pixels,4,4,16));
+    CHECK(abs((int)pixels[2]-128)<=1);
+    CHECK(wiiu_window_gpu_configure(target,8,8,0x41a));
+    CHECK(wiiu_window_gpu_clear(source,4,4,255,255,255,128));
+    CHECK(wiiu_window_gpu_clear(target,8,8,0,0,0,0));
+    WiiUWindowGpuBlendControl alpha_blend={true,4,5,0,true,1,0,0};
+    CHECK(wiiu_window_gpu_draw_postprocess(target,8,8,source,NULL,4,4,0,v,3,
+        0,0x00010203,viewport,&alpha_blend,false,0,0,0,0));
+    CHECK(wiiu_window_gpu_readback(target,pixels,8,8,32));
+    CHECK(abs((int)pixels[2]-188)<=1);
     /* HDR values must survive a real PS sample/export between render targets,
        not just a CPU round trip or a UNORM screenshot conversion. */
     const uint32_t formats[]={0x806,0x810,0x820,0x80e,0x81e,0x823,0x816};

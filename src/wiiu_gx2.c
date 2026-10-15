@@ -222,6 +222,7 @@ static u32 g_tv_scan_color_buffer;
 static u32 g_drc_scan_color_buffer;
 static u32 g_tv_width;
 static u32 g_tv_height;
+static bool g_tv_scan_srgb;
 static u32 g_swap_interval;
 static u32 g_surface_log_count;
 static u32 g_display_list_log_count;
@@ -3680,7 +3681,7 @@ static bool draw_scene_material(CPUState* cpu,const WiiULattePixelProgram* progr
             if(!source->gpu_composited)upload_software_surface_to_gpu(source);
             material.source_surfaces[i]=source->image;map=texture->comp_map;
         } else {
-            bool numeric=texture->format==5 || texture->format==0x1f || (texture->format&0x800u)!=0;
+            bool numeric=texture->format==5 || texture->format==0x1f || (texture->format&0xc00u)!=0;
             GX2DecodedTexture* decoded=decode_texture_cached_kind(cpu,texture,numeric);
             if(!decoded || !decoded->pixels)return scene_rejected("pixel-texture-format",i);
             material.textures[i].pixels=decoded->pixels;material.textures[i].serial=decoded->serial;
@@ -3878,13 +3879,13 @@ static int draw_postprocess(CPUState* cpu,u32 primitive,u32 count,u32 first_vert
     }
     if(source==target) goto done;
     if(mode>=4 && source) goto done; /* effect material currently consumes decoded textures only */
-    GX2DecodedTexture* decoded=source?NULL:decode_texture_cached(cpu,texture);
+    GX2DecodedTexture* decoded=source?NULL:decode_texture_cached_kind(cpu,texture,(texture->format&0x400u)!=0);
     if(!source && (!decoded || !decoded->pixels)) goto done;
     GX2DecodedTexture* extra[2]={0};
     u32 extra_count=mode>=7?2:mode==4?1:0;
     for(u32 i=0;i<extra_count;++i) {
         if(!g_pixel_textures[i+1].valid || find_color_surface_by_image(g_pixel_textures[i+1].image)) goto done;
-        extra[i]=decode_texture_cached(cpu,&g_pixel_textures[i+1]);
+        extra[i]=decode_texture_cached_kind(cpu,&g_pixel_textures[i+1],(g_pixel_textures[i+1].format&0x400u)!=0);
         if(!extra[i] || !extra[i]->pixels) goto done;
     }
     float viewport[4]={0,0,(float)target->width,(float)target->height};
@@ -3901,6 +3902,7 @@ static int draw_postprocess(CPUState* cpu,u32 primitive,u32 count,u32 first_vert
         for(u32 i=0;i<extra_count;++i) textures[i+1]=(WiiUWindowEffectTexture){
             extra[i]->pixels,g_pixel_textures[i+1].width,g_pixel_textures[i+1].height,extra[i]->serial};
         for(u32 i=0;i<=extra_count;++i) {
+            textures[i].floating_pixels=i?extra[i-1]->floating_pixels:decoded->floating_pixels;
             textures[i].sampler_valid=g_pixel_samplers[i].valid;
             textures[i].sampler_word0=g_pixel_samplers[i].words[0];
         }
@@ -4367,33 +4369,55 @@ static void present_scan_buffer(void) {
      */
     g_has_active_frame = true;
     bool presented_gpu = false;
+    GX2HostColorSurface displayed=*surface;
+    u8* display_pixels=NULL;
     if (surface->gpu_composited) {
-        presented_gpu = wiiu_window_gpu_present(surface->image,
-                                                 surface->width,
-                                                 surface->height);
+        u32 scanout;
+        if(wiiu_window_gpu_scanout(surface->image,surface->width,surface->height,
+                                   g_tv_scan_srgb,&scanout)) {
+            displayed.image=scanout;
+            displayed.format=g_tv_scan_srgb?0x41a:0x1a;
+            presented_gpu=wiiu_window_gpu_present(scanout,surface->width,surface->height);
+        }
         if (!presented_gpu)
             (void)synchronize_gpu_surface_for_software(surface);
     }
     if (!presented_gpu && surface->pixels) {
+        displayed=*surface;
+        bool source_srgb=surface->format==0x41a;
+        if(source_srgb!=g_tv_scan_srgb) {
+            size_t bytes=(size_t)surface->width*surface->height*4;
+            display_pixels=malloc(bytes);
+            if(display_pixels) {
+                memcpy(display_pixels,surface->pixels,bytes);
+                for(size_t i=0;i<bytes;i+=4)for(unsigned c=0;c<3;++c) {
+                    float value=display_pixels[i+c]/255.0f;
+                    value=g_tv_scan_srgb?(value<=.0031308f?12.92f*value:1.055f*powf(value,1/2.4f)-.055f):
+                        (value<=.04045f?value/12.92f:powf((value+.055f)/1.055f,2.4f));
+                    display_pixels[i+c]=clamp_color(value*255);
+                }
+                displayed.pixels=display_pixels;displayed.gpu_composited=false;
+            }
+        }
         wiiu_window_present_bgra(surface->width, surface->height,
-                                 surface->pixels, surface->width * 4u);
+                                 displayed.pixels, surface->width * 4u);
     } else if (!presented_gpu) {
         wiiu_window_present_solid(surface->width, surface->height,
                                   surface->red, surface->green,
                                   surface->blue, surface->alpha);
     }
     if (surface->drawn && !g_first_render_dumped &&
-        dump_surface_ppm(surface, "sm3dw_first_render.ppm")) {
+        dump_surface_ppm(&displayed, "sm3dw_first_render.ppm")) {
         g_first_render_dumped = true;
     }
     if (surface->drawn &&
         g_largest_frame_command_count >= 80u &&
         !g_menu_candidate_dumped &&
-        dump_surface_ppm(surface, "sm3dw_menu_candidate.ppm")) {
+        dump_surface_ppm(&displayed, "sm3dw_menu_candidate.ppm")) {
         g_menu_candidate_dumped = true;
     }
     if (surface->drawn && (g_frame_count % 120u) == 0u) {
-        dump_surface_ppm(surface, "sm3dw_latest.ppm");
+        dump_surface_ppm(&displayed, "sm3dw_latest.ppm");
         GX2HostColorSurface* drc=find_color_surface(g_drc_scan_color_buffer,false);
         if(drc && drc!=surface) dump_surface_ppm(drc,"sm3dw_drc_latest.ppm");
         if(g_frame_count==240u) {
@@ -4409,9 +4433,9 @@ static void present_scan_buffer(void) {
     if (g_swap_log_count++ < 32u || (g_frame_count % 60u) == 0u) {
         fprintf(stderr,
                 "gx2: present frame=%llu color=0x%08X image=0x%08X "
-                "%ux%u rgba=(%u,%u,%u,%u)\n",
+                "%ux%u format=0x%X scan-srgb=%u rgba=(%u,%u,%u,%u)\n",
                 (unsigned long long)g_frame_count, surface->descriptor,
-                surface->image, surface->width, surface->height,
+                surface->image, surface->width, surface->height, surface->format,g_tv_scan_srgb,
                 surface->red, surface->green, surface->blue, surface->alpha);
     }
     if ((g_frame_count % 60u) == 0u &&
@@ -4423,6 +4447,7 @@ static void present_scan_buffer(void) {
                 (unsigned long long)g_fast_ui_quad_count,
                 (unsigned long long)g_fallback_ui_quad_count);
     }
+    free(display_pixels);
     g_present_ticks += clock() - present_start;
     if ((g_frame_count % 60u) == 0u) {
         double ticks_to_ms = 1000.0 / (double)CLOCKS_PER_SEC;
@@ -4838,6 +4863,7 @@ void wiiu_gx2_reset(void) {
     g_drc_scan_color_buffer = 0;
     g_tv_width = 0;
     g_tv_height = 0;
+    g_tv_scan_srgb = false;
     g_swap_interval = 1u;
     g_surface_log_count = 0;
     g_display_list_log_count = 0;
@@ -5145,6 +5171,7 @@ void wiiu_gx2_handle_import(CPUState* cpu, const char* name) {
     }
 
     if (is_name(name, "GX2SetTVBuffer")) {
+        g_tv_scan_srgb=(cpu->gpr[6]&0x400u)!=0;
         static const u16 widths[] = {0, 640, 854, 1280, 1280, 1920};
         static const u16 heights[] = {0, 480, 480, 720, 720, 1080};
         u32 mode = cpu->gpr[5];

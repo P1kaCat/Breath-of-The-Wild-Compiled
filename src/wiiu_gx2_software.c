@@ -254,6 +254,13 @@ static void decode_bc1_color(const u8* block, u32 pixel, bool force_four,
     u8 colors[4][4];
     decode_r5g6b5(c0, colors[0]);
     decode_r5g6b5(c1, colors[1]);
+    /* BC endpoints use red in bits 11..15, unlike Latte's uncompressed
+       R5_G6_B5. Do not apply the uncompressed channel order to DXT blocks. */
+    for (u32 i = 0; i < 2u; ++i) {
+        u8 red = colors[i][0];
+        colors[i][0] = colors[i][2];
+        colors[i][2] = red;
+    }
     if (c0 > c1 || force_four) {
         for (u32 channel = 0; channel < 3u; channel++) {
             colors[2][channel] =
@@ -409,10 +416,23 @@ static bool float_texel(const u8* data,const WiiUGX2TextureView* t,u32 x,u32 y,f
     case 0x81e:channels=2;bytes=4;break;
     case 0x823:channels=4;bytes=4;break;
     default: {
-        if(t->format!=1 && t->format!=7 && t->format!=8 && t->format!=0x1a &&
-           (t->format<0x31 || t->format>0x35))return false;
-        u8 bgra[4];if(!sample_texture(data,t,x,y,bgra))return false;
-        out[0]=bgra[2]/255.0f;out[1]=bgra[1]/255.0f;out[2]=bgra[0]/255.0f;out[3]=bgra[3]/255.0f;
+        u32 format=t->format&~0x400u;
+        if(format!=1 && format!=7 && format!=8 && format!=0x1a &&
+           (format<0x31 || format>0x35))return false;
+        bool srgb=(t->format&0x400u)!=0;
+        if(srgb && format!=0x1a && (format<0x31 || format>0x33))return false;
+        WiiUGX2TextureView raw=*t;raw.comp_map=0x00010203;
+        u8 bgra[4];if(!sample_texture(data,&raw,x,y,bgra))return false;
+        float rgba[4]={bgra[2]/255.0f,bgra[1]/255.0f,bgra[0]/255.0f,bgra[3]/255.0f};
+        /* Decode before filtering and component selection. Alpha is linear,
+           and a channel mapped into alpha still needs its source conversion. */
+        if(srgb)for(unsigned c=0;c<3;++c)
+            rgba[c]=rgba[c]<=.04045f?rgba[c]/12.92f:powf((rgba[c]+.055f)/1.055f,2.4f);
+        for(unsigned c=0;c<4;++c) {
+            unsigned sel=t->comp_map?(t->comp_map>>((3-c)*8))&255:c;
+            if(sel>5)return false;
+            out[c]=sel<4?rgba[sel]:sel==5?1:0;
+        }
         return true;
     }
     }

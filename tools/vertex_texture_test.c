@@ -17,6 +17,40 @@ int main(void) {
     CHECK(wiiu_memory_add_segment(&memory,"vertex texture fixture",base,65536,NULL,true));
     wiiu_memory_bind_cpu(&memory,&cpu);wiiu_gx2_reset();
     const u32 point=2|(2<<3),linear=point|(1<<9)|(1<<12);
+    /* Standard DXT endpoints put red in the high bits. The uncompressed
+       Latte R5_G6_B5 format deliberately uses the opposite order. */
+    WiiUGX2TextureView color_view={data,16,4,4,1,0x31,16,0,1,0x00010203,0};
+    u8 color_pixels[64];
+    for(u32 format=0x31;format<=0x33;++format) {
+        color_view.format=format;color_view.image_size=format==0x31?8:16;
+        u32 color_data=data+(format==0x31?0:8);
+        le(&cpu,data,0xffffffff);le(&cpu,data+4,0xffffffff);
+        if(format==0x33){le(&cpu,data,0x0000ffff);le(&cpu,data+4,0);}
+        le(&cpu,color_data,0x001ff800);le(&cpu,color_data+4,0xe4e4e4e4);
+        CHECK(wiiu_gx2_software_blit(&cpu,&color_view,color_pixels,4,4,16,0,0,4,4,false));
+        CHECK(color_pixels[0]==0 && color_pixels[2]==255 && color_pixels[3]==255);
+        CHECK(color_pixels[4]==255 && color_pixels[6]==0 && color_pixels[7]==255);
+        CHECK(color_pixels[8]==85 && color_pixels[10]==170);
+        CHECK(color_pixels[12]==170 && color_pixels[14]==85);
+    }
+    color_view.format=8;color_view.width=color_view.height=color_view.pitch=1;color_view.image_size=2;
+    le(&cpu,data,0x001f);
+    CHECK(wiiu_gx2_software_blit(&cpu,&color_view,color_pixels,1,1,4,0,0,1,1,false));
+    CHECK(color_pixels[0]==0 && color_pixels[2]==255);
+    /* sRGB is decoded before bilinear filtering or component selection;
+       alpha and synthesized constants never get gamma corrected. */
+    color_view.format=0x41a;color_view.image_size=8;color_view.width=color_view.pitch=2;
+    le(&cpu,data,0x800a4080);le(&cpu,data+4,0xff0000ff);
+    float color_value[4];
+    CHECK(wiiu_gx2_software_sample_float(&cpu,&color_view,point,.25f,.5f,color_value));
+    CHECK(fabsf(color_value[0]-.2158605f)<.00001f && fabsf(color_value[1]-.0512695f)<.00001f);
+    CHECK(fabsf(color_value[2]-.00303527f)<.00001f && color_value[3]==128/255.0f);
+    CHECK(wiiu_gx2_software_sample_float(&cpu,&color_view,linear,.5f,.5f,color_value));
+    CHECK(fabsf(color_value[0]-(.2158605f+1)*.5f)<.00001f);
+    color_view.comp_map=0x03050400;
+    CHECK(wiiu_gx2_software_sample_float(&cpu,&color_view,point,.25f,.5f,color_value));
+    CHECK(color_value[0]==128/255.0f && color_value[1]==1 && color_value[2]==0 &&
+          fabsf(color_value[3]-.2158605f)<.00001f);
     /* Integer bone indices must reach MULLO_INT as integers, while existing
        layout consumers can still read numeric float attributes. */
     WiiULatteFetchStream integer_stream={0};

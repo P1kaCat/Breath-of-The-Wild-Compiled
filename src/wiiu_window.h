@@ -153,6 +153,10 @@ bool wiiu_window_gpu_draw_surface_material(
     uint32_t scissor_width, uint32_t scissor_height);
 bool wiiu_window_gpu_present(uint32_t surface, uint32_t width,
                              uint32_t height);
+/* Convert the guest render target through the TV scan-buffer color space.
+   The returned surface contains display-ready bytes for both present/capture. */
+bool wiiu_window_gpu_scanout(uint32_t source, uint32_t width, uint32_t height,
+                             bool srgb, uint32_t* output);
 void wiiu_window_gpu_invalidate(uint32_t surface);
 bool wiiu_window_gpu_finish(void);
 void wiiu_window_read_input(uint32_t* held, uint32_t* pressed,
