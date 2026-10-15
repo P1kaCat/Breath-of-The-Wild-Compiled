@@ -1,11 +1,11 @@
-# Référence visuelle BOTW
+# BOTW visual reference
 
-La présentation utilise la palette de l'interface (`Main Tan UI`, `#E2DED3`) et un ornement original du **Zelda BOTW UI Kit** de **Hunter Paramore**.
+The presentation uses the interface palette (`Main Tan UI`, `#E2DED3`) and an original ornament from **Hunter Paramore's Zelda BOTW UI Kit**.
 
-- Auteur : https://hunterparamore.com/
-- Source : https://www.figma.com/community/file/965825767811358609/zelda-botw-ui-kit
-- Composant : `Text Ornament Corner`, nœud `179:205` de la copie Figma de travail.
-- Export : `text-ornament-corner.svg`, 35 × 35, conservé sans modification.
-- Licence du kit : CC BY 4.0, selon les indications accompagnant la copie locale ; https://creativecommons.org/licenses/by/4.0/.
+- Author: https://hunterparamore.com/
+- Source: https://www.figma.com/community/file/965825767811358609/zelda-botw-ui-kit
+- Component: `Text Ornament Corner`, node `179:205` in the working Figma copy.
+- Export: `text-ornament-corner.svg`, 35 × 35, retained without modification.
+- Kit license: CC BY 4.0, according to the information accompanying the local copy; https://creativecommons.org/licenses/by/4.0/.
 
-La bannière et les textes de présentation sont propres à BOTW Compiled. Les autres sprites, images du jeu et le fichier `.fig` complet ne sont pas publiés ici. Le kit sert de référence pour les interfaces à venir ; cela ne signifie pas que l'interface native du port est déjà implémentée.
+The banner and presentation text belong to BOTW Compiled. Other sprites, game images, and the complete `.fig` file are not published here. The kit serves as a reference for future interfaces; this does not mean the port's native interface has already been implemented.

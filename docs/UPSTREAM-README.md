@@ -1,4 +1,4 @@
-# CafeRecomp (documentation amont)
+# CafeRecomp (upstream documentation)
 
 CafeRecomp is an open-source Wii U recompilation project focused on bringing Wii U games to modern PCs through static recompilation and a custom runtime.
 

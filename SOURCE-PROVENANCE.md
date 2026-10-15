@@ -1,16 +1,16 @@
-# Origine des sources
+# Source provenance
 
-BOTW Compiled est une base de port Windows expérimental de Breath of the Wild Wii U.
+BOTW Compiled is an experimental foundation for a Windows port of Breath of the Wild for Wii U.
 
-- Base CafeRecomp : https://github.com/hardkiller2565123123/CafeRecomp, commit `922b852e56cd440d23ed8ede3e0b86495e68967f`.
-- Le traducteur DolRecomp intégré provient de cette base. Sa licence GPL-3.0 et ses notices sont conservées dans `third_party/DolRecomp` et `LICENSE-DolRecomp-GPL-3.0`.
-- Le code dérivé de Cemu conserve ses notices et la licence MPL-2.0 dans `LICENSE-Cemu-MPL-2.0` ; voir également `CEMU_INTEGRATION`.
-- WiiCompiled : https://github.com/patchzyy/wiicompiled, commit `bd219e38a3e9a1a5047ce41d8cd01210bef3af43`, consulté comme référence. Aucun code importé.
+- CafeRecomp base: https://github.com/hardkiller2565123123/CafeRecomp, commit `922b852e56cd440d23ed8ede3e0b86495e68967f`.
+- The bundled DolRecomp translator comes from that base. Its GPL-3.0 license and notices are preserved in `third_party/DolRecomp` and `LICENSE-DolRecomp-GPL-3.0`.
+- Code derived from Cemu retains its notices and the MPL-2.0 license in `LICENSE-Cemu-MPL-2.0`; see also `CEMU_INTEGRATION`.
+- WiiCompiled: https://github.com/patchzyy/wiicompiled, commit `bd219e38a3e9a1a5047ce41d8cd01210bef3af43`, consulted as a reference. No code was imported.
 
-Les changements propres à ce projet comprennent les outils de préparation isolée, les paramètres de présentation, le remplacement local des shaders pixel, la correction des accès SPR Espresso générés et la sélection de l'identité du titre européen.
+Project-specific changes include isolated preparation tools, presentation settings, local pixel shader overrides, a fix for generated Espresso SPR accesses, and selection of the European title identity.
 
-La publication commence par un nouvel historique afin d'exclure les binaires suivis dans le dépôt amont. Les licences, les avis présents dans les fichiers et ces références sont conservés. Les fichiers du jeu, ses clés et sauvegardes, le code généré à partir du RPX et les résultats de compilation ne sont pas distribués ici.
+Publication starts with a new history to exclude binaries tracked in the upstream repository. Licenses, notices within source files, and these references are retained. Game files, keys, saves, code generated from the RPX, and build output are not distributed here.
 
-La [présentation et les crédits de l'amont](docs/UPSTREAM-README.md) sont conservés séparément de la page d'accueil de BOTW Compiled.
+The [upstream presentation and credits](docs/UPSTREAM-README.md) are preserved separately from the BOTW Compiled homepage.
 
-L'ornement de la présentation GitHub provient du Zelda BOTW UI Kit de Hunter Paramore. Son [origine et son attribution](docs/assets/botw-ui/README.md) sont conservées avec l'export SVG ; le fichier Figma complet reste local.
+The GitHub presentation ornament comes from Hunter Paramore's Zelda BOTW UI Kit. Its [source and attribution](docs/assets/botw-ui/README.md) are retained with the SVG export; the complete Figma file stays local.

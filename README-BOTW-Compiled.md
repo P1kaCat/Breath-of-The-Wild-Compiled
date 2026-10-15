@@ -1,18 +1,18 @@
 # BOTW Compiled
 
-Port natif expérimental de **Breath of the Wild Wii U** pour Windows x64, basé sur CafeRecomp. Ce dépôt contient le runtime et les outils ; les fichiers du jeu et le code généré restent dans un espace de travail local séparé.
+Experimental native Windows x64 port of **Breath of the Wild for Wii U**, based on CafeRecomp. This repository contains the runtime and tools; game files and generated code remain in a separate local workspace.
 
-La recompilation PowerPC, le runtime Cafe et le traducteur de shaders GX2/Latte sont hérités de CafeRecomp. Son rendu complet de Link et du décor reste incomplet. Construire le programme ou réussir les tests GPU ne prouve pas que le jeu est jouable.
+PowerPC recompilation, the Cafe runtime, and the GX2/Latte shader translator are inherited from CafeRecomp. Rendering of Link and the environment remains incomplete. Building the program or passing GPU tests does not establish that the game is playable.
 
-Dans cette session, 24 tests du runtime passent. Le lancement montre l'écran d'ouverture et le texte d'introduction, puis un écran jaune uni avec des programmes vertex rejetés. Voir [la validation](VALIDATION.md). Les captures restent locales.
+The recorded runtime suite passes 24 tests. Launching displays the opening screen and introductory text, followed by a solid yellow screen with rejected vertex programs. See the [validation notes](VALIDATION.md). Captures remain local.
 
-## Démarrer
+## Getting started
 
-Prérequis : Visual Studio 2022 avec les outils C++ et un SDK Windows, CMake et PowerShell. La compilation du traducteur télécharge zlib depuis sa distribution officielle, avec une empreinte SHA-256 épinglée.
+Requirements: Visual Studio 2022 with C++ tools and a Windows SDK, CMake, and PowerShell. Building the translator downloads zlib from its official distribution with a pinned SHA-256 checksum.
 
-Au dernier contrôle de cette session, Visual Studio 2022 n'est plus installé. Le build effectué et ses binaires sont conservés ; il faut réinstaller les outils C++ pour reconstruire le projet.
+At the last recorded tooling check, Visual Studio 2022 was no longer installed. The completed build and its binaries are retained locally; rebuilding requires the C++ tools.
 
-Depuis ce dossier :
+From this directory:
 
 ```powershell
 .\botw.ps1 doctor
@@ -23,64 +23,64 @@ Depuis ce dossier :
 .\botw.ps1 run -Headless -Mute -Blocks 10000
 ```
 
-Le projet est regroupé dans `E:\BOTW Compiled`. Le chemin par défaut des données et journaux est le sous-dossier `workspace`, calculé depuis le dossier du projet. Utiliser `-WorkRoot` pour changer ce chemin dans chaque commande. Les titres doivent être extraits dans `game/base`, `game/update` et `game/dlc` sous ce chemin. La préparation réussie écrit `snapshot.complete.json` ; le lancement exige ce marqueur pour éviter de démarrer pendant une extraction. Le RPX v208 est vérifié avant génération et lancement ; une empreinte différente est refusée car les hooks hérités utilisent des adresses fixes.
+The local project is located at `E:\BOTW Compiled`. The default data and log directory is the `workspace` subfolder, resolved relative to the project directory. Use `-WorkRoot` to override it for each command. Extracted titles belong in `game/base`, `game/update`, and `game/dlc` beneath that directory. Successful preparation writes `snapshot.complete.json`; launching requires this marker to avoid starting during extraction. The v208 RPX checksum is checked before generation and launch. A different checksum is rejected because the inherited hooks use fixed addresses.
 
-Les commandes `components` et `translator` fonctionnent sans fichiers du jeu. `components` construit et teste les shaders, textures, cibles HDR, post-traitement, mémoire et audio avec des entrées contrôlées.
+The `components` and `translator` commands work without game files. `components` builds and tests shaders, textures, HDR targets, post-processing, memory, and audio using controlled inputs.
 
-La génération écrit plusieurs gigaoctets de C dans l'espace de travail. Le build complet produit `game-build/bin/botw_recomp.exe` et ses DLL. La limite de blocs du lancement par défaut est un diagnostic ; `-Blocks 0` lance sans cette limite.
+Generation writes several gigabytes of C into the workspace. By default, the full build produces `game-build/bin/botw_recomp.exe` and its DLLs. The default launch block limit is for diagnostics; `-Blocks 0` runs without that limit.
 
-Les sorties natives sont dans `E:\BOTW Compiled\build\native`, et les copies du jeu et les sources générées dans `E:\BOTW Compiled\workspace`. Le chemin du build réussi est conservé dans `workspace/native-build.json`, puis repris par `doctor` et `run`. Des jonctions aux anciens emplacements permettent de conserver les chemins absolus du build existant. Les anciennes copies des sources et des données sont conservées à côté de ces jonctions avec le suffixe `.before-relocation`. Une reconstruction à partir de zéro doit utiliser un nouveau `-BuildRoot`. Aucun de ces dossiers n'est le dossier Cemu actif.
+The retained native build is in `E:\BOTW Compiled\build\native`; copied game data and generated sources are in `E:\BOTW Compiled\workspace`. The successful build path is stored in `workspace/native-build.json` and reused by `doctor` and `run`. Junctions at the old locations preserve absolute paths embedded in the existing build. Original source and data copies are retained beside those junctions with the `.before-relocation` suffix. Use a new `-BuildRoot` for a clean rebuild. These directories are separate from the active Cemu installation.
 
-`-BuildRoot` permet de choisir un autre dossier de compilation native. L'option de développement `-PrecompiledObjects` peut réutiliser les objets Release déjà construits avec le même compilateur, les mêmes options et le même ABI ; les dates des sources et des en-têtes sont vérifiées. Cette session utilise ce cache pour relier la DLL sur le SSD en reconstruisant les sources modifiées.
+`-BuildRoot` selects another native build directory. The development option `-PrecompiledObjects` can reuse existing Release objects built with the same compiler, options, and ABI; source and header timestamps are checked. The retained build used this cache to link the DLL on the SSD while recompiling modified sources.
 
-Les sources dont les dates sont plus récentes que les objets sont recompilées normalement. `-RecompileGenerated` force la reconstruction complète, notamment après un changement de compilateur ou d'options.
+Sources newer than their objects are recompiled normally. `-RecompileGenerated` forces a full rebuild, including after compiler or build-option changes.
 
-`test` exécute les tests du runtime complet si le lanceur a été construit, sinon ceux des composants.
+`test` runs the complete runtime suite when the launcher has been built, or the component suite otherwise.
 
-## Réglages disponibles
+## Available settings
 
-### Logo personnalisé
+### Custom logo
 
-Place un PNG dans `custom-assets/textures/title-logo.png`, puis exécute `python tools/install_logo.py` depuis ce dossier (Python 3.10+, dépendances dans `tools/requirements-assets.txt`). L'outil conserve les proportions et la transparence, puis remplace le logo dans les deux archives de la mise à jour isolée. Les dimensions, le format, les offsets et la taille décompressée du layout sont conservés ; les autres membres des archives sont vérifiés.
+Place a PNG in `custom-assets/textures/title-logo.png`, then run `python tools/install_logo.py` from this directory. This requires Python 3.10+ and the dependencies in `tools/requirements-assets.txt`. The tool preserves proportions and transparency and replaces the logo in both isolated update archives. Texture dimensions, format, layout offsets, and decompressed layout size are preserved; other archive members are verified.
 
-Le prochain lancement du port utilise le logo installé. `python tools/install_logo.py --restore` rétablit les archives d'origine, sauvegardées dans `workspace/custom-assets-backup/title-logo`. Aucun fichier Cemu actif n'est modifié. Le PNG et les archives restent exclus de GitHub.
+The next launch uses the installed logo. `python tools/install_logo.py --restore` restores the original archives backed up in `workspace/custom-assets-backup/title-logo`. No active Cemu files are modified. The PNG and archives remain excluded from GitHub.
 
-### Présentation
+### Presentation
 
 ```powershell
 .\botw.ps1 run -Width 1920 -Height 1080 -VSync -PresentationFilter linear -Blocks 0
 ```
 
-`Width` et `Height` changent la taille cliente de la fenêtre et la présentation. Ils n'augmentent pas encore la résolution des cibles de rendu du jeu. La VSync agit sur le swapchain D3D11. Le filtre `nearest` ou `linear` concerne seulement la présentation finale ; les samplers de matériaux du jeu sont conservés.
+`Width` and `Height` change the window's client dimensions and presentation. They do not yet increase the resolution of the game's render targets. VSync applies to the D3D11 swap chain. The `nearest` or `linear` filter affects only final presentation; game material samplers are preserved.
 
-Les deux axes d'amélioration souhaités seront développés séparément : résolution interne, ombres et distances d'affichage d'une part ; éclairage, effets et textures d'autre part. Ils restent à implémenter après la validation des scènes d'origine. Aucun réglage fictif de ray tracing, textures HD, FPS ou distance d'affichage n'est exposé.
+The planned graphics improvements will have separate settings: internal resolution, shadows, and draw distance; and lighting, effects, and textures. They remain to be implemented after validating the original scenes. No placeholder ray tracing, HD texture, FPS, or draw-distance controls are exposed.
 
-### Remplacement local de shaders pixel
+### Local pixel shader overrides
 
-L'option `-ShaderOverrides` exporte les shaders pixel traduits et compilés pour la première fois dans `shader-overrides` sous l'espace de travail : `XXXXXXXX.original.hlsl`. Pour expérimenter, copier un fichier en `XXXXXXXX.override.hlsl`, modifier cette copie, puis relancer le programme. Les shaders déjà en cache ne sont pas rechargés immédiatement.
+`-ShaderOverrides` exports pixel shaders when they are first translated and compiled into the workspace's `shader-overrides` directory as `XXXXXXXX.original.hlsl`. To experiment, copy one to `XXXXXXXX.override.hlsl`, edit the copy, and relaunch. Already cached shaders are not reloaded immediately.
 
-Le contenu complet du fichier d'origine est comparé avant d'appliquer un remplacement, pour éviter qu'une collision de l'identifiant sélectionne un autre shader. Le fichier d'origine n'est jamais écrasé. Une source invalide ou un fichier d'origine modifié bloque ce shader et produit un diagnostic. Les remplacements doivent conserver les interfaces de ressources et de sorties du shader. Cette fonctionnalité couvre uniquement les shaders pixel que le traducteur sait déjà traiter ; elle ne complète pas les instructions Latte manquantes et ne constitue pas une amélioration d'éclairage du jeu déjà validée.
+The full original file is compared before applying an override, preventing an identifier collision from selecting a different shader. The original file is never overwritten. Invalid source or a modified original blocks that shader and produces a diagnostic. Overrides must preserve the shader's resource and output interfaces. This feature covers only pixel shaders already supported by the translator; it does not implement missing Latte instructions or establish a validated lighting improvement in the game.
 
-`-Capture` enregistre les captures de diagnostic dans le même espace de travail. Les programmes/shaders du jeu et les fichiers générés restent locaux et ne sont pas ajoutés au dépôt.
+`-Capture` saves diagnostic captures in the same workspace. Game programs, shaders, and generated files remain local and are not added to the repository.
 
-Un essai limité dans le temps peut être lancé avec `run -Blocks 0 -Seconds 120 -Headless -Mute -Capture`. Seul le processus créé par cette commande est arrêté à la limite ; cela ne ferme pas Cemu. Un arrêt par cette limite est une fin de diagnostic, pas la preuve d'un démarrage réussi.
+Run a time-limited probe with `run -Blocks 0 -Seconds 120 -Headless -Mute -Capture`. Only the process started by that command is stopped at the deadline; it does not close Cemu. Reaching this deadline is a diagnostic stop, not evidence of a successful full boot.
 
-## Isolation des données
+## Data isolation
 
-La préparation de cette session utilise une copie des trois titres NUS, puis une extraction vers l'espace de travail. Elle n'inclut pas les sauvegardes Cemu. Le lanceur utilise uniquement les titres extraits de cette copie. Les chemins de sauvegarde hérités du runtime aboutissent dans `game/update/save` sous l'espace de travail ; les logs sont dans `logs/runtime.log`.
+Preparation uses copies of the three NUS titles, extracted into the workspace. It does not include Cemu saves. The launcher uses only these extracted copies. Save paths inherited from the runtime resolve beneath `game/update/save` in the workspace; logs are in `logs/runtime.log`.
 
-`BOTW_WIIU_MLC_ROOT` est fixé à `system/mlc01` dans cet espace : le lanceur ne recherche pas automatiquement le MLC de Cemu. Des fichiers système manquants peuvent encore empêcher un lancement complet ; ils devront provenir d'une copie séparée du dump de la console.
+`BOTW_WIIU_MLC_ROOT` is set to `system/mlc01` inside this workspace. The launcher does not automatically search Cemu's MLC. Missing system files may still prevent a complete launch; they must come from a separate copy of the console dump.
 
-La préparation de cette session inclut seulement une copie de `portable/mlc01/sys/title` depuis Cemu, sans `usr/save`. Le script `tools/prepare-game.ps1` permet de reproduire la copie/extraction des trois titres européens avec un exécutable CDecrypt fourni par l'utilisateur et un nouvel espace de travail ; il refuse une extraction déjà existante.
+The recorded preparation copied only `portable/mlc01/sys/title` from Cemu, without `usr/save`. `tools/prepare-game.ps1` can reproduce the copy and extraction of the three European titles using a user-supplied CDecrypt executable and a fresh workspace; it refuses an existing extraction.
 
-Le dossier Cemu actif et sa sauvegarde ne sont pas modifiés. Ne rediriger aucun de ces chemins vers la session Cemu active.
+The active Cemu directory and saves are unchanged. Do not redirect these paths into an active Cemu session.
 
-La recompilation du RPX européen v208 utilise la même empreinte que l'amont. Le lanceur construit par `botw.ps1 build` prend le titre, le groupe et la région dans les métadonnées copiées. Les services de titre et de DLC du runtime utilisent cette identité, au lieu de déclarer systématiquement un titre américain.
+The European v208 RPX has the checksum expected by the upstream hooks. When built through `botw.ps1 build`, the launcher reads title, group, and region from the copied metadata. Runtime title and DLC services use this identity instead of always reporting a North American title.
 
 ## Provenance
 
-- [CafeRecomp](https://github.com/hardkiller2565123123/CafeRecomp), commit `922b852e56cd440d23ed8ede3e0b86495e68967f` : base du code, licences et notices conservées.
-- [WiiCompiled](https://github.com/patchzyy/wiicompiled), commit `bd219e38a3e9a1a5047ce41d8cd01210bef3af43` : référence pour le pipeline et les contrôles de recompilation PowerPC. Son runtime Wii/GX ne constitue pas un backend Wii U/GX2. Aucun code de ce dépôt n'a été importé.
-- [CDecrypt](https://github.com/VitaSmith/cdecrypt) : utilisé localement pour extraire la copie NUS dans un dossier distinct ; il n'est pas livré avec ce projet.
+- [CafeRecomp](https://github.com/hardkiller2565123123/CafeRecomp), commit `922b852e56cd440d23ed8ede3e0b86495e68967f`: code base; licenses and notices retained.
+- [WiiCompiled](https://github.com/patchzyy/wiicompiled), commit `bd219e38a3e9a1a5047ce41d8cd01210bef3af43`: reference for the PowerPC recompilation pipeline and checks. Its Wii/GX runtime is not a Wii U/GX2 backend. No code was imported.
+- [CDecrypt](https://github.com/VitaSmith/cdecrypt): used locally to extract the NUS copy into a separate directory; not distributed with this project.
 
-Les historiques `README` et `RELEASE-NOTES` décrivent les essais de l'amont, pas des essais effectués sur ce nouveau projet. `VALIDATION.md` décrit les contrôles de cette session.
+The historical `README` and `RELEASE-NOTES` describe upstream experiments, not tests performed for this project. `VALIDATION.md` records this project's checks.

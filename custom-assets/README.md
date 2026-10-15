@@ -1,21 +1,21 @@
-# Assets personnalisés
+# Custom assets
 
-Dépose tes propres fichiers dans les sous-dossiers :
+Place your own files in these subfolders:
 
-- `textures/` : textures et images.
-- `models/` : modèles et animations.
-- `shaders/` : sources de shaders personnalisés.
-- `audio/` : sons et musiques.
-- `ui/` : kits et références pour l'interface.
+- `textures/`: textures and images.
+- `models/`: models and animations.
+- `shaders/`: custom shader source files.
+- `audio/`: sounds and music.
+- `ui/`: interface kits and references.
 
-Ces fichiers restent locaux : Git publie uniquement ces instructions et les dossiers vides. Les fichiers du jeu et ses sauvegardes restent dans leur espace de travail séparé.
+These files stay local: Git publishes only these instructions and the empty folder structure. Game files and saves remain in their separate workspace.
 
-Le logo de l'écran d'accueil est pris en charge : place ton PNG transparent dans `textures/title-logo.png`, puis lance `python tools/install_logo.py` depuis le dossier du projet. Il remplace la texture du logo dans les copies locales de `Bootup.pack` et `Title.pack`. Le prochain lancement utilise alors ce logo. Python 3.10 ou supérieur, Pillow et oead sont nécessaires (`python -m pip install -r tools/requirements-assets.txt`).
+Custom opening logos are supported. Place a transparent PNG at `textures/title-logo.png`, then run `python tools/install_logo.py` from the project directory. It replaces the logo texture in the local copies of `Bootup.pack` and `Title.pack`; the next launch uses the new logo. Python 3.10 or newer, Pillow, and oead are required (`python -m pip install -r tools/requirements-assets.txt`).
 
-Pour revenir au logo du jeu, utilise `python tools/install_logo.py --restore`. Les archives d'origine sont conservées dans `workspace/custom-assets-backup/title-logo`. Les archives modifiées et le PNG restent locaux.
+To restore the game's logo, run `python tools/install_logo.py --restore`. Original archives are backed up in `workspace/custom-assets-backup/title-logo`. Modified archives and the PNG stay local.
 
-Pour les autres assets, ce dossier sert à préparer tes fichiers. Le runtime ne charge pas encore automatiquement leur contenu ; leur intégration au jeu reste à développer.
+For other assets, this folder is a preparation area. The runtime does not automatically load them yet; their game integration remains to be developed.
 
-Le kit Figma de référence peut être conservé dans `ui/zelda-botw-ui-kit.fig`. Cette copie complète reste locale ; la présentation GitHub utilise seulement un ornement SVG exporté et les couleurs du kit.
+The reference Figma kit can be kept at `ui/zelda-botw-ui-kit.fig`. This complete copy stays local; the GitHub presentation uses only an exported SVG ornament and the kit's colors.
 
-Pour le remplacement de shaders pixel déjà disponible, utilise `workspace/shader-overrides` et l'option `-ShaderOverrides` du lanceur, comme décrit dans le guide principal.
+For the existing pixel shader override feature, use `workspace/shader-overrides` and the launcher's `-ShaderOverrides` option as described in the main guide.
