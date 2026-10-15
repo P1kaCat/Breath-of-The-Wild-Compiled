@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero.svg" alt="BOTW Compiled — Redécouvrir Hyrule, autrement." width="100%">
+  <img src="docs/assets/hero-botw-ui.svg" alt="BOTW Compiled — Redécouvrir Hyrule, autrement." width="100%">
 </p>
 
 <p align="center">
@@ -43,7 +43,7 @@ Le logo d'accueil peut déjà être remplacé par un PNG personnalisé, avec con
 Le dossier [`custom-assets`](custom-assets/README.md) accueille vos textures, modèles, shaders et sons. L'intégration des autres types d'assets reste à construire.
 
 <p align="center">
-  <img src="docs/assets/divider.svg" alt="" width="100%">
+  <img src="docs/assets/divider-botw-ui.svg" alt="" width="100%">
 </p>
 
 ## L'aventure en cours
