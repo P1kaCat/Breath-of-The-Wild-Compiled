@@ -29,6 +29,8 @@ The `components` and `translator` commands work without game files. `components`
 
 Generation writes several gigabytes of C into the workspace. By default, the full build produces `game-build/bin/botw_recomp.exe` and its DLLs. The default launch block limit is for diagnostics; `-Blocks 0` runs without that limit.
 
+For double-click launching on Windows, the build also produces `bin/BOTW Compiled.exe`. Copy this small native launcher to the project root, leaving the runtime and its DLLs in their build directory. It starts the native runtime directly, without PowerShell, using the isolated `workspace/game` copy and no diagnostic block limit. Output is written to `workspace/logs/launcher-output.log`. This launcher does not change the current rendering or playability status.
+
 The retained native build is in `E:\BOTW Compiled\build\native`; copied game data and generated sources are in `E:\BOTW Compiled\workspace`. The successful build path is stored in `workspace/native-build.json` and reused by `doctor` and `run`. Junctions at the old locations preserve absolute paths embedded in the existing build. Original source and data copies are retained beside those junctions with the `.before-relocation` suffix. Use a new `-BuildRoot` for a clean rebuild. These directories are separate from the active Cemu installation.
 
 `-BuildRoot` selects another native build directory. The development option `-PrecompiledObjects` can reuse existing Release objects built with the same compiler, options, and ABI; source and header timestamps are checked. The retained build used this cache to link the DLL on the SSD while recompiling modified sources.

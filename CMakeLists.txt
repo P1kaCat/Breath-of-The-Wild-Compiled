@@ -37,6 +37,15 @@ set(GENERATED_DIR "${CMAKE_CURRENT_LIST_DIR}/recomp/generated" CACHE PATH
     "DolRecomp-generated BOTW C output")
 
 option(BOTW_BUILD_GAME "Build the game launcher and generated code" ON)
+if(WIN32)
+    file(RELATIVE_PATH BOTW_LAUNCH_RUNTIME "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${BOTW_OUTPUT_ROOT}/bin/botw_recomp.exe")
+    add_executable(botw_launcher WIN32 tools/windows_launcher.c)
+    set_target_properties(botw_launcher PROPERTIES OUTPUT_NAME "BOTW Compiled")
+    target_compile_definitions(botw_launcher PRIVATE
+        UNICODE _UNICODE BOTW_LAUNCH_RUNTIME=L"${BOTW_LAUNCH_RUNTIME}")
+    target_link_libraries(botw_launcher PRIVATE user32)
+endif()
 include(cmake/RuntimeComponents.cmake)
 if(NOT BOTW_BUILD_GAME)
     include(cmake/DevelopmentTests.cmake)
