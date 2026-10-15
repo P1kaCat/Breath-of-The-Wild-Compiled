@@ -12,3 +12,5 @@ Les changements propres à ce projet comprennent les outils de préparation isol
 La publication commence par un nouvel historique afin d'exclure les binaires suivis dans le dépôt amont. Les licences, les avis présents dans les fichiers et ces références sont conservés. Les fichiers du jeu, ses clés et sauvegardes, le code généré à partir du RPX et les résultats de compilation ne sont pas distribués ici.
 
 La [présentation et les crédits de l'amont](docs/UPSTREAM-README.md) sont conservés séparément de la page d'accueil de BOTW Compiled.
+
+L'ornement de la présentation GitHub provient du Zelda BOTW UI Kit de Hunter Paramore. Son [origine et son attribution](docs/assets/botw-ui/README.md) sont conservées avec l'export SVG ; le fichier Figma complet reste local.

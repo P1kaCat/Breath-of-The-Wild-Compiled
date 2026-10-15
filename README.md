@@ -9,7 +9,7 @@
   <a href="#rejoindre-laventure">Commencer</a>
 </p>
 
-<h1 align="center">Une nouvelle voie vers Hyrule.</h1>
+<h1 align="center"><img src="docs/assets/botw-ui/text-ornament-corner.svg" alt="" width="35" height="35"> Une nouvelle voie vers Hyrule.</h1>
 
 <p align="center">
   Un port natif pour PC. Une image à façonner. Une aventure à personnaliser.

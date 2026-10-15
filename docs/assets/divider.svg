@@ -1,12 +1,3 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="60" viewBox="0 0 1280 60" role="presentation">
-  <defs>
-    <linearGradient id="line">
-      <stop stop-color="#b8a16a" stop-opacity="0"/><stop offset=".5" stop-color="#b8a16a" stop-opacity=".55"/><stop offset="1" stop-color="#b8a16a" stop-opacity="0"/>
-    </linearGradient>
-  </defs>
-  <path d="M80 30h505m110 0h505" stroke="url(#line)"/>
-  <g fill="#b8a16a">
-    <path d="m640 9-12 21h24ZM628 30l-12 21h24ZM652 30l-12 21h24Z"/>
-    <path d="m593 26 4 4-4 4-4-4zM687 26l4 4-4 4-4-4z" opacity=".6"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="42" viewBox="0 0 1280 42" role="presentation">
+  <path d="M64 21h1152" stroke="#66645a" stroke-opacity=".6"/>
 </svg>
