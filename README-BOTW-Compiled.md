@@ -39,6 +39,14 @@ Les sources dont les dates sont plus récentes que les objets sont recompilées 
 
 ## Réglages disponibles
 
+### Logo personnalisé
+
+Place un PNG dans `custom-assets/textures/title-logo.png`, puis exécute `python tools/install_logo.py` depuis ce dossier (Python 3.10+, dépendances dans `tools/requirements-assets.txt`). L'outil conserve les proportions et la transparence, puis remplace le logo dans les deux archives de la mise à jour isolée. Les dimensions, le format, les offsets et la taille décompressée du layout sont conservés ; les autres membres des archives sont vérifiés.
+
+Le prochain lancement du port utilise le logo installé. `python tools/install_logo.py --restore` rétablit les archives d'origine, sauvegardées dans `workspace/custom-assets-backup/title-logo`. Aucun fichier Cemu actif n'est modifié. Le PNG et les archives restent exclus de GitHub.
+
+### Présentation
+
 ```powershell
 .\botw.ps1 run -Width 1920 -Height 1080 -VSync -PresentationFilter linear -Blocks 0
 ```

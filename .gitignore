@@ -72,3 +72,6 @@ CTestTestfile.cmake
 Testing/
 /saves/
 /mlc01/
+__pycache__/
+*.py[cod]
+.venv/

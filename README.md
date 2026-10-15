@@ -4,7 +4,7 @@ Port natif expérimental de **Breath of the Wild Wii U** pour Windows, avec des 
 
 Lire [le guide de démarrage](README-BOTW-Compiled.md) et [la validation de cette session](VALIDATION.md).
 
-Le dossier [custom-assets](custom-assets/README.md) accueille tes propres textures, modèles, shaders et sons. Son contenu reste local ; le chargement automatique de ces assets reste à développer.
+Le dossier [custom-assets](custom-assets/README.md) accueille tes propres textures, modèles, shaders et sons. Le remplacement du logo d'accueil par un PNG local est disponible via `tools/install_logo.py`. Le chargement automatique des autres assets reste à développer.
 
 Ce dépôt publie les sources, les outils, les tests et les licences. Les fichiers du jeu, le code PowerPC généré, les assets locaux, les captures et les binaires compilés sont exclus.
 

@@ -9,6 +9,10 @@ Dépose tes propres fichiers dans les sous-dossiers :
 
 Ces fichiers restent locaux : Git publie uniquement ces instructions et les dossiers vides. Les fichiers du jeu et ses sauvegardes restent dans leur espace de travail séparé.
 
-Ce dossier sert pour l'instant à préparer tes assets. Le runtime ne charge pas encore automatiquement son contenu ; leur intégration au jeu reste à développer.
+Le logo de l'écran d'accueil est pris en charge : place ton PNG transparent dans `textures/title-logo.png`, puis lance `python tools/install_logo.py` depuis le dossier du projet. Il remplace la texture du logo dans les copies locales de `Bootup.pack` et `Title.pack`. Le prochain lancement utilise alors ce logo. Python 3.10 ou supérieur, Pillow et oead sont nécessaires (`python -m pip install -r tools/requirements-assets.txt`).
+
+Pour revenir au logo du jeu, utilise `python tools/install_logo.py --restore`. Les archives d'origine sont conservées dans `workspace/custom-assets-backup/title-logo`. Les archives modifiées et le PNG restent locaux.
+
+Pour les autres assets, ce dossier sert à préparer tes fichiers. Le runtime ne charge pas encore automatiquement leur contenu ; leur intégration au jeu reste à développer.
 
 Pour le remplacement de shaders pixel déjà disponible, utilise `workspace/shader-overrides` et l'option `-ShaderOverrides` du lanceur, comme décrit dans le guide principal.
