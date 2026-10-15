@@ -1,0 +1,20 @@
+{
+  "name": "BOTW Compiled",
+  "platform": "Wii U",
+  "state": "experimental bring-up",
+  "references": [
+    {
+      "url": "https://github.com/hardkiller2565123123/CafeRecomp",
+      "commit": "922b852e56cd440d23ed8ede3e0b86495e68967f",
+      "role": "runtime and recompilation base"
+    },
+    {
+      "url": "https://github.com/patchzyy/wiicompiled",
+      "commit": "bd219e38a3e9a1a5047ce41d8cd01210bef3af43",
+      "role": "reference only; no code imported"
+    }
+  ],
+  "supported_rpx_sha256": "ba58da5b95ce929e005d058ceb08b9b2788d1ab2bbc8a6c189bbadca0bb34d30",
+  "upstream_target": "North America update v208",
+  "graphics_backend": "D3D11 (incomplete GX2/Latte support)"
+}

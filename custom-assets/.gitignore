@@ -1,0 +1,6 @@
+# Keep the folder structure and instructions; user assets stay local.
+*
+!*/
+!.gitkeep
+!/.gitignore
+!/README.md
