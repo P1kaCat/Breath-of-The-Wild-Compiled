@@ -10,3 +10,5 @@ BOTW Compiled est une base de port Windows expérimental de Breath of the Wild W
 Les changements propres à ce projet comprennent les outils de préparation isolée, les paramètres de présentation, le remplacement local des shaders pixel, la correction des accès SPR Espresso générés et la sélection de l'identité du titre européen.
 
 La publication commence par un nouvel historique afin d'exclure les binaires suivis dans le dépôt amont. Les licences, les avis présents dans les fichiers et ces références sont conservés. Les fichiers du jeu, ses clés et sauvegardes, le code généré à partir du RPX et les résultats de compilation ne sont pas distribués ici.
+
+La [présentation et les crédits de l'amont](docs/UPSTREAM-README.md) sont conservés séparément de la page d'accueil de BOTW Compiled.

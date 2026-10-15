@@ -1,86 +1,82 @@
-# BOTW Compiled
+<p align="center">
+  <img src="docs/assets/hero.svg" alt="BOTW Compiled — Redécouvrir Hyrule, autrement." width="100%">
+</p>
 
-Port natif expérimental de **Breath of the Wild Wii U** pour Windows, avec des réglages graphiques séparés et un système de remplacement local des shaders pixel.
+<p align="center">
+  <a href="#le-projet">Le projet</a> &nbsp;·&nbsp;
+  <a href="#notre-vision">Notre vision</a> &nbsp;·&nbsp;
+  <a href="#laventure-en-cours">Avancement</a> &nbsp;·&nbsp;
+  <a href="#rejoindre-laventure">Commencer</a>
+</p>
 
-Lire [le guide de démarrage](README-BOTW-Compiled.md) et [la validation de cette session](VALIDATION.md).
+<h1 align="center">Une nouvelle voie vers Hyrule.</h1>
 
-Le dossier [custom-assets](custom-assets/README.md) accueille tes propres textures, modèles, shaders et sons. Le remplacement du logo d'accueil par un PNG local est disponible via `tools/install_logo.py`. Le chargement automatique des autres assets reste à développer.
+<p align="center">
+  Un port natif pour PC. Une image à façonner. Une aventure à personnaliser.
+</p>
 
-Ce dépôt publie les sources, les outils, les tests et les licences. Les fichiers du jeu, le code PowerPC généré, les assets locaux, les captures et les binaires compilés sont exclus.
+## Le projet
 
-Le runtime provient de [CafeRecomp](https://github.com/hardkiller2565123123/CafeRecomp). Le rendu complet du jeu reste en développement. Les sections ci-dessous sont conservées de l'amont et décrivent son état, pas un résultat obtenu avec cette copie de BOTW Compiled.
+**BOTW Compiled** est notre projet de port natif de **The Legend of Zelda: Breath of the Wild**, à partir de sa version Wii U. Nous construisons une version Windows avec davantage de liberté pour le rendu et les créations personnalisées.
 
----
+Notre ambition : retrouver l'identité visuelle d'Hyrule et ouvrir de nouvelles possibilités pour celles et ceux qui veulent aller plus loin.
 
-# CafeRecomp (documentation amont)
+> [!IMPORTANT]
+> **L'aventure est encore en construction.** L'écran d'accueil et le début de l'introduction s'affichent. Le rendu 3D reste incomplet : le jeu n'est pas encore entièrement jouable.
 
-CafeRecomp is an open-source Wii U recompilation project focused on bringing Wii U games to modern PCs through static recompilation and a custom runtime.
+## Notre vision
 
-The project is currently focused on **The Legend of Zelda: Breath of the Wild**, but CafeRecomp is being built as a reusable Wii U recompilation framework rather than a game-specific project.
+### Un port natif sur PC
 
-The same framework can be adapted for other Wii U titles, with game-specific support built on top of the shared recompilation, runtime, and rendering systems.
+Recompiler le code Wii U et construire les systèmes nécessaires à son exécution sur Windows. Le premier objectif reste un jeu stable, avec des personnages, des décors et des effets correctement affichés.
 
-## Video
+### Une image à votre mesure
 
-[Watch the CafeRecomp early prototype / proof of concept](https://www.youtube.com/watch?v=v7CwIDTCNas)
+Les dimensions de la fenêtre, la synchronisation verticale et le filtre de présentation sont déjà réglables séparément.
 
-## Breath of the Wild
+Nous voulons ensuite proposer deux axes indépendants : **résolution interne, ombres et distances d'affichage** d'un côté ; **éclairage, effets et textures** de l'autre. Ces améliorations restent à développer après la stabilisation du rendu d'origine.
 
-**The Legend of Zelda: Breath of the Wild** is currently the main development target for CafeRecomp.
+### Votre signature dans Hyrule
 
-Current work is focused on getting the game through the boot process, improving runtime compatibility, and continuing development of the graphics and rendering systems.
+Le logo d'accueil peut déjà être remplacé par un PNG personnalisé, avec conservation de l'original. Le remplacement local des shaders pixel est également disponible.
 
-Breath of the Wild is still in development and is not currently considered fully playable.
+Le dossier [`custom-assets`](custom-assets/README.md) accueille vos textures, modèles, shaders et sons. L'intégration des autres types d'assets reste à construire.
 
-## Current Progress
+<p align="center">
+  <img src="docs/assets/divider.svg" alt="" width="100%">
+</p>
 
-Current work includes:
+## L'aventure en cours
 
-- Wii U PowerPC static recompilation
-- RPX and RPL support
-- Native PC execution
-- Custom Wii U runtime
-- Custom renderer
-- GX2 graphics support
-- Shader support
-- Texture and surface support
-- Render targets and depth handling
-- Filesystem support
-- Memory management
-- Input support
-- Runtime debugging and logging
-- Breath of the Wild boot and compatibility work
+- [x] Base de recompilation Wii U et exécution native sur Windows.
+- [x] Premiers écrans et début de l'introduction affichés.
+- [x] Logo d'accueil personnalisé, installation réversible.
+- [x] Réglages de présentation et remplacement de shaders pixel.
+- [ ] Corriger le rendu 3D des personnages et des décors.
+- [ ] Valider les déplacements, les combats et la progression.
+- [ ] Développer les réglages graphiques avancés et l'intégration des assets.
 
-CafeRecomp is still in active development, and many parts of the Wii U environment are still being implemented.
+Les observations et les limites actuelles sont détaillées dans le [suivi de validation](VALIDATION.md).
 
-## Building
+## Rejoindre l'aventure
 
-CafeRecomp is currently intended for development and testing.
+Le dépôt contient les **sources, les outils de développement et les tests**. La préparation et la compilation sont décrites dans le [guide de démarrage](README-BOTW-Compiled.md).
 
-Build instructions and project requirements are included with the source code.
+```powershell
+git clone https://github.com/P1kaCat/Breath-of-The-Wild-Compiled.git
+cd Breath-of-The-Wild-Compiled
+```
 
-## Credits
+Les fichiers du jeu doivent être fournis séparément. Les données du jeu, les sauvegardes, les assets locaux et les résultats de compilation restent hors du dépôt.
 
-Special thanks to the projects and developers whose work helped make CafeRecomp possible:
+Pour participer, [signalez un problème](https://github.com/P1kaCat/Breath-of-The-Wild-Compiled/issues) ou [proposez une contribution](https://github.com/P1kaCat/Breath-of-The-Wild-Compiled/pulls).
 
-- [DolRecomp](https://github.com/ExpansionPak/DolRecomp) — base recompilation framework
-- [Cemu](https://github.com/cemu-project/Cemu) — Wii U and rendering reference
-- [gx2gl](https://github.com/ExpansionPak/gx2gl) — GX2 graphics reference
-- [Aurora](https://github.com/encounter/aurora) — GX2 rendering reference
-- [ModernGekko-Template](https://github.com/ExpansionPak/ModernGekko-Template) — project structure reference
+<p align="center">
+  <br>
+  <strong>BOTW COMPILED</strong><br>
+  <sub>Redécouvrir Hyrule, autrement.</sub>
+</p>
 
-Thank you to everyone who contributed to these projects and shared their work with the community.
-
-## Disclaimer
-
-CafeRecomp is an independent preservation and research project and is not affiliated with, endorsed by, or sponsored by Nintendo.
-
-Wii U, Nintendo, The Legend of Zelda, Breath of the Wild, and related names and trademarks belong to their respective owners.
-
-CafeRecomp does not provide copyrighted game files, firmware, encryption keys, or other proprietary Nintendo content.
-
-Users are responsible for providing legally obtained files required for their own use.
-
-## License
-
-See the repository license for details.
+<p align="center">
+  <sub><a href="README-BOTW-Compiled.md">Documentation</a> · <a href="custom-assets/README.md">Créations personnalisées</a> · <a href="SOURCE-PROVENANCE.md">Sources et licences</a></sub>
+</p>

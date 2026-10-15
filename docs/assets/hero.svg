@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="590" viewBox="0 0 1280 590" role="img" aria-labelledby="title description">
+  <title id="title">BOTW Compiled</title>
+  <desc id="description">Bannière bleu nuit et or : une épée stylisée, des montagnes et des motifs géométriques entourent le titre du projet. Redécouvrir Hyrule, autrement. Projet en développement.</desc>
+  <defs>
+    <linearGradient id="sky" x2="1" y2="1">
+      <stop stop-color="#112c30"/><stop offset=".6" stop-color="#0b1b22"/><stop offset="1" stop-color="#071117"/>
+    </linearGradient>
+    <linearGradient id="gold" x2=".8" y2="1">
+      <stop stop-color="#eee0b0"/><stop offset=".5" stop-color="#c6ad70"/><stop offset="1" stop-color="#8c794a"/>
+    </linearGradient>
+    <linearGradient id="blade" x2="1" y2="0">
+      <stop stop-color="#6d929a"/><stop offset=".47" stop-color="#e0ece7"/><stop offset=".5" stop-color="#a8c6c6"/><stop offset="1" stop-color="#436d7b"/>
+    </linearGradient>
+    <pattern id="stars" width="160" height="130" patternUnits="userSpaceOnUse">
+      <circle cx="31" cy="24" r="1" fill="#d8ceaa" opacity=".18"/><circle cx="117" cy="88" r=".8" fill="#6fbbb9" opacity=".22"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="590" rx="12" fill="url(#sky)"/>
+  <rect width="1280" height="590" rx="12" fill="url(#stars)"/>
+  <path d="M0 481 114 431 197 456 286 397 394 467 483 441 609 486 718 422 808 453 915 386 1018 434 1135 375 1280 444V590H0Z" fill="#143236" opacity=".75"/>
+  <path d="m0 534 136-48 135 36 119-20 127 36 133-21 120 29 143-38 100 19 144-33 123 34v62H0Z" fill="#0a1c21"/>
+  <path d="M19 85V19h66M1195 19h66v66M1261 505v66h-66M85 571H19v-66" fill="none" stroke="#b6a16b" stroke-width="1.5" opacity=".7"/>
+  <path d="M95 19h1090M1261 95v400M1185 571H95M19 495V95" fill="none" stroke="#a58e55" stroke-width=".6" opacity=".18"/>
+  <path d="m19 46 4 5-4 5-4-5zM1261 46l4 5-4 5-4-5zM19 534l4 5-4 5-4-5zM1261 534l4 5-4 5-4-5z" fill="#c6ad70" opacity=".65"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <path d="M76 84h42" stroke="#c6ad70" stroke-width="1.5"/>
+    <text x="133" y="89" fill="#b6c4c0" font-size="12" letter-spacing="4">LE PROJET · PORT NATIF PC</text>
+  </g>
+  <text x="72" y="220" fill="#eadfbc" font-family="Georgia, 'Times New Roman', serif" font-size="85" letter-spacing="17">BOTW</text>
+  <text x="68" y="324" fill="url(#gold)" font-family="Georgia, 'Times New Roman', serif" font-size="102" letter-spacing="3">COMPILED</text>
+  <path d="M77 352h39m15 0h296m17 0h39" stroke="#b7a16a" stroke-width="1" opacity=".7"/>
+  <path d="m122 348 4 4-4 4-4-4zM434 348l4 4-4 4-4-4z" fill="#d9c48b"/>
+  <text x="77" y="398" fill="#ddd6bb" font-family="Arial, Helvetica, sans-serif" font-size="16" letter-spacing="2.2">REDÉCOUVRIR HYRULE, AUTREMENT.</text>
+  <text x="77" y="433" fill="#91aaa9" font-family="Arial, Helvetica, sans-serif" font-size="14">Recompilation Wii U · Liberté graphique · Personnalisation</text>
+  <g transform="translate(77 484)">
+    <rect width="224" height="32" rx="16" fill="#b59d60" fill-opacity=".07" stroke="#a78e54" stroke-opacity=".55"/>
+    <circle cx="18" cy="16" r="3" fill="#cfb878"/>
+    <text x="32" y="20" fill="#d6c391" font-family="Arial, Helvetica, sans-serif" font-size="10" letter-spacing="2">EN DÉVELOPPEMENT</text>
+  </g>
+  <g transform="translate(1008 287)" fill="none">
+    <circle r="173" stroke="#678d89" stroke-opacity=".13"/>
+    <circle r="151" stroke="#a18e59" stroke-opacity=".32" stroke-dasharray="1 12"/>
+    <circle r="126" stroke="#b6a06a" stroke-opacity=".32"/>
+    <path d="M-164-39h-22v78h22M164-39h22v78h-22M-39-164v-22h78v22M-39 164v22h78v-22" stroke="#809f95" stroke-opacity=".32"/>
+    <path d="m0-133 133 133L0 133-133 0Z" stroke="#a58f58" stroke-opacity=".18"/>
+    <path d="m0-198 5 8-5 8-5-8zM198 0l-8 5-8-5 8-5zM0 198l-5-8 5-8 5 8zM-198 0l8-5 8 5-8 5z" fill="#bda66b" opacity=".55"/>
+  </g>
+  <g transform="translate(1008 48)">
+    <path d="m0 9-13 17 5 9h16l5-9Z" fill="#a5b9ba" stroke="#c7d4cb"/>
+    <path d="M-8 35h16v94H-8Z" fill="#1c5e5d" stroke="#6a9b8a"/>
+    <path d="m-8 41 16 13-16 13 16 13-16 13 16 13-16 13" fill="none" stroke="#b3b996" stroke-width="2.5" opacity=".65"/>
+    <path d="M-13 124h26v14h-26Z" fill="#8e845d" stroke="#d4c18c"/>
+    <path d="m-13 137-41 10-20 34 35-13 28-8h22l28 8 35 13-20-34-41-10Z" fill="#354973" stroke="#809aa4" stroke-width="2"/>
+    <path d="m-13 145-37 12-12 13 28-11 22-5M13 145l37 12 12 13-28-11-22-5" fill="none" stroke="#a0b4bf" stroke-opacity=".65"/>
+    <path d="m0 136-13 20 13 23 13-23Z" fill="url(#gold)"/>
+    <path d="M-11 173v230L0 438l11-35V173l-11 12Z" fill="url(#blade)" stroke="#9db4b1"/>
+    <path d="M0 187v229" stroke="#d9e5dc" stroke-width=".8" opacity=".55"/>
+    <path d="m0 204-10 17h20Zm-10 17-10 17H0Zm20 0L0 238h20Z" fill="#b5ba96" fill-opacity=".3"/>
+    <path d="M-26 448h52" stroke="#baa36a" stroke-opacity=".5"/>
+  </g>
+</svg>
