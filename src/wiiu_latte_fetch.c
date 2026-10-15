@@ -748,6 +748,34 @@ static bool decode_components(CPUState* cpu, u32 address,
     return true;
 }
 
+static bool native_fetch_words(CPUState* cpu,u32 address,u32 endian,
+    const WiiULatteFetchStream* stream,const WiiULatteFetchFormatInfo* info,
+    const float source[4],u32 result[4]) {
+    u32 raw[4]={0,0,0,1};
+    bool integer=info->integer && !info->floating;
+    if(!integer)memcpy(raw,source,sizeof(raw));
+    else {
+        unsigned shift=0;
+        for(unsigned c=0;c<info->component_count;++c) {
+            unsigned bits=info->component_bits[c];u32 value;
+            if(bits==8)value=mem_read8(cpu,address+c);
+            else if(bits==16)value=read_fetch_u16(cpu,address+c*2,endian);
+            else if(bits==32)value=read_fetch_u32(cpu,address+c*4,endian);
+            else {
+                if(!bits || shift+bits>32 || info->byte_size>4)return false;
+                u32 packed=info->byte_size==1?mem_read8(cpu,address):read_fetch_u32(cpu,address,endian);
+                value=(packed>>shift)&((1u<<bits)-1u);shift+=bits;
+            }
+            raw[c]=info->signed_values?(u32)fetch_sign_extend(value,bits):value;
+        }
+    }
+    for(unsigned c=0;c<4;++c) {
+        unsigned select=(stream->dest_sel>>(24-c*8))&7;
+        result[c]=select<4?raw[select]:select==5?(integer?1u:0x3f800000u):0;
+    }
+    return true;
+}
+
 static void apply_destination_selection(const WiiULatteFetchStream* stream,
                                         const float source[4],
                                         float output[4]) {
@@ -839,6 +867,10 @@ bool wiiu_latte_fetch_vertex(CPUState* cpu,
             continue;
         }
         apply_destination_selection(stream, source, result->gpr[stream->location]);
+        if(!native_fetch_words(cpu,(u32)address64,endian_swap,stream,&format,source,
+            result->words[stream->location])) {
+            result->failed_count++;continue;
+        }
         result->valid[stream->location] = 1u;
         result->fetched_count++;
     }

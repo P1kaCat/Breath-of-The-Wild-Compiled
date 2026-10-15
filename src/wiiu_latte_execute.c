@@ -5,13 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static bool unsupported(unsigned line) {
-    /* Opt-in offline diagnostics; ordinary draws remain silent. */
-    const char* trace=getenv("BOTW_LATTE_TRACE");
-    if(trace && *trace=='1') fprintf(stderr,"latte: rejected at executor line %u\n",line);
-    return false;
-}
-
 typedef struct { uint32_t a, b; unsigned unit; } Instruction;
 typedef struct {
     uint32_t r[128][4], pv[5];
@@ -21,7 +14,28 @@ typedef struct {
     bool active;
     bool trace_alu;
     const WiiULatteVertexInputs* inputs;
+    WiiULatteVertexFailure* failure;
 } State;
+
+static bool unsupported_reason(State* s,unsigned line,const char* reason) {
+    if(s->failure && !s->failure->line) {
+        s->failure->line=line;
+        snprintf(s->failure->reason,sizeof(s->failure->reason),"%s",reason);
+    }
+    const char* trace=getenv("BOTW_LATTE_TRACE");
+    if(trace && *trace=='1') fprintf(stderr,"latte: rejected at executor line %u (%s)\n",line,reason);
+    return false;
+}
+static bool unsupported(State* s,unsigned line) {
+    return unsupported_reason(s,line,"unsupported encoding or execution state");
+}
+static void instruction_context(State* s,unsigned slot,uint32_t a,uint32_t b,unsigned opcode) {
+    if(!s->failure)return;
+    s->failure->instruction_slot=slot;s->failure->word0=a;s->failure->word1=b;
+    s->failure->opcode=opcode;s->failure->source_index=UINT32_MAX;
+    s->failure->source_select=UINT32_MAX;s->failure->source_channel=UINT32_MAX;
+    s->failure->detail0=s->failure->detail1=0;
+}
 static uint32_t le(const uint8_t* p) {
     return p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24;
 }
@@ -68,43 +82,50 @@ static unsigned source_channel(Instruction i,unsigned s) {
 static bool source(State* s,Instruction i,unsigned n,uint32_t cf0,uint32_t cf1,
                    const uint32_t literals[4],uint32_t* result) {
     unsigned sel=select_source(i,n), c=source_channel(i,n);
+    if(s->failure) {s->failure->source_index=n;s->failure->source_select=sel;s->failure->source_channel=c;}
     bool rel=n==0?(i.a>>9)&1:n==1?(i.a>>22)&1:(i.b>>9)&1;
     int32_t relative=0;
     if(rel) {
         unsigned mode=(i.a>>26)&7;
-        if(mode>3 || !(s->address_valid&(1u<<mode)))return unsupported(__LINE__);
+        if(mode>3 || !(s->address_valid&(1u<<mode)))return unsupported_reason(s,__LINE__,"unsupported or uninitialized relative address");
         relative=s->address[mode];
     }
     uint32_t bits;
     if(sel<128) {
         int reg=(int)sel+relative;
-        if(reg<0 || reg>=128)return unsupported(__LINE__);
+        if(reg<0 || reg>=128)return unsupported(s,__LINE__);
         sel=(unsigned)reg;
-        if(!(s->valid[sel]&(1u<<c))) return unsupported(__LINE__);
+        if(!(s->valid[sel]&(1u<<c))) return unsupported_reason(s,__LINE__,"uninitialized GPR component");
         bits=s->r[sel][c];
     } else if(sel<192) {
         unsigned bank=sel<160?(cf0>>22)&15:(cf0>>26)&15;
         unsigned base=sel<160?(cf1>>2)&255:(cf1>>10)&255;
         unsigned mode=sel<160?(cf0>>30)&3:cf1&3;
         /* KCACHE_LOCK_1/2 are fixed banks; loop-relative addressing is not. */
-        if(mode!=1 && mode!=2) return unsupported(__LINE__);
+        if(mode!=1 && mode!=2) return unsupported_reason(s,__LINE__,"unsupported kcache lock mode");
         int vector=(int)((sel&31)+base*16)+relative;
-        if(vector<0)return unsupported(__LINE__);
+        if(vector<0)return unsupported(s,__LINE__);
         uint64_t offset=(uint64_t)vector*16+c*4;
         const uint8_t* p=s->inputs->blocks[bank];
-        if(!p || offset+4>s->inputs->block_sizes[bank]) return unsupported(__LINE__);
+        if(!p || offset+4>s->inputs->block_sizes[bank]) {
+            if(s->failure){s->failure->detail0=bank;s->failure->detail1=(uint32_t)offset;}
+            return unsupported_reason(s,__LINE__,"uniform block missing or read outside captured block");
+        }
         p+=offset;
         /* Uniform blocks are GPU-native words, unlike the CPU-endian
            GX2SetVertexUniformReg arguments. Cemu uploads these bytes as-is. */
         bits=le(p);
     } else if(sel>=256) {
         int vector=(int)sel-256+relative;
-        if(vector<0)return unsupported(__LINE__);
+        if(vector<0)return unsupported(s,__LINE__);
         unsigned word=(unsigned)vector*4+c;
         if(word>=s->inputs->uniform_count || !s->inputs->uniforms ||
-           !s->inputs->uniform_valid || !s->inputs->uniform_valid[word]) return unsupported(__LINE__);
+           !s->inputs->uniform_valid || !s->inputs->uniform_valid[word]) {
+            if(s->failure){s->failure->detail0=word;s->failure->detail1=s->inputs->uniform_count;}
+            return unsupported_reason(s,__LINE__,"uniform register missing or uninitialized");
+        }
         bits=s->inputs->uniforms[word];
-    } else { if(rel)return unsupported(__LINE__);switch(sel) {
+    } else { if(rel)return unsupported(s,__LINE__);switch(sel) {
     case 248: bits=0; break;
     case 249: bits=0x3f800000; break;
     case 250: bits=1; break;
@@ -113,10 +134,10 @@ static bool source(State* s,Instruction i,unsigned n,uint32_t cf0,uint32_t cf1,
     case 253: bits=literals[c]; break;
     case 254: case 255: {
         unsigned lane=sel==254?c:4;
-        if(!(s->pv_valid&(1u<<lane))) return unsupported(__LINE__);
+        if(!(s->pv_valid&(1u<<lane))) return unsupported_reason(s,__LINE__,"uninitialized previous ALU result");
         bits=s->pv[lane]; break;
     }
-    default: return unsupported(__LINE__);
+    default: return unsupported(s,__LINE__);
     }
     }
     bool absolute=!op3(i) && ((i.b>>n)&1);
@@ -134,8 +155,9 @@ static float multiply(float a,float b,bool ieee) {
     /* Latte MUL flushes a zero operand, including 0*Inf; MUL_IEEE does not. */
     return !ieee && (a==0 || b==0)?0:a*b;
 }
-static bool evaluate(Instruction i,const uint32_t v[3],uint32_t* out) {
+static bool evaluate(State* s,Instruction i,const uint32_t v[3],uint32_t* out) {
     float a=as_float(v[0]),b=as_float(v[1]),c=as_float(v[2]),f;
+    if(s->failure) {s->failure->source_index=UINT32_MAX;s->failure->detail0=v[0];s->failure->detail1=v[1];}
     unsigned op=opcode(i);
     int32_t sa,sb;memcpy(&sa,&v[0],4);memcpy(&sb,&v[1],4);
     if(predicate_op(i)) {
@@ -176,11 +198,11 @@ static bool evaluate(Instruction i,const uint32_t v[3],uint32_t* out) {
         if(!isfinite(a) || a<-2147483648.0f || a>=2147483648.0f) {
             const char* trace=getenv("BOTW_LATTE_TRACE");
             if(trace && *trace=='1') fprintf(stderr,"latte: FLT_TO_INT input=%08X (%g)\n",v[0],a);
-            return unsupported(__LINE__);
+            return unsupported_reason(s,__LINE__,"FLT_TO_INT nonfinite or out of range");
         }
         *out=(uint32_t)(int32_t)a;return true;
     case 0x79:
-        if(!isfinite(a) || a<0 || a>=4294967296.0f) return unsupported(__LINE__);
+        if(!isfinite(a) || a<0 || a>=4294967296.0f) return unsupported_reason(s,__LINE__,"FLT_TO_UINT nonfinite or out of range");
         *out=(uint32_t)a;return true;
     case 0x70: {
         unsigned shift=v[1]&31;
@@ -202,7 +224,7 @@ static bool evaluate(Instruction i,const uint32_t v[3],uint32_t* out) {
         case 0x18: f=a==0?b:c; break;
         case 0x19: f=a>0?b:c; break;
         case 0x1a: f=a>=0?b:c; break;
-        default: return unsupported(__LINE__);
+        default: return unsupported(s,__LINE__);
         }
     } else switch(op) {
     case 0: f=a+b; break;
@@ -210,7 +232,7 @@ static bool evaluate(Instruction i,const uint32_t v[3],uint32_t* out) {
     case 3: f=fmaxf(a,b); break;
     case 4: f=fminf(a,b); break;
     case 5: case 6:
-        if(isnan(a) || isnan(b)) return unsupported(__LINE__); /* NaN-mode distinction not implemented. */
+        if(isnan(a) || isnan(b)) return unsupported(s,__LINE__); /* NaN-mode distinction not implemented. */
         f=op==5?fmaxf(a,b):fminf(a,b);break;
     case 8: f=a==b?1.0f:0.0f; break;
     case 9: f=a>b?1.0f:0.0f; break;
@@ -226,7 +248,7 @@ static bool evaluate(Instruction i,const uint32_t v[3],uint32_t* out) {
     }
     case 0x14: f=floorf(a); break;
     case 0x16:
-        if(isnan(a))return unsupported(__LINE__);
+        if(isnan(a))return unsupported(s,__LINE__);
         f=fminf(255,fmaxf(-256,floorf(a)));break;
     case 0x18:
         *out=(uint32_t)(sa < -256 ? -256 : sa > 255 ? 255 : sa);return true;
@@ -244,31 +266,33 @@ static bool evaluate(Instruction i,const uint32_t v[3],uint32_t* out) {
     case 0x6d: f=(float)v[0];break;
     case 0x6e: f=sinf(a/0.1591549367f);break;
     case 0x6f: f=cosf(a/0.1591549367f);break;
-    default: return unsupported(__LINE__);
+    default: return unsupported(s,__LINE__);
     }
     *out=as_bits(f); return true;
 }
 static bool clause(State* s,const uint8_t* p,size_t size,uint32_t a,uint32_t b) {
     unsigned at=a&0x3fffff,count=((b>>18)&127)+1;
-    if((uint64_t)(at+count)*8>size) return unsupported(__LINE__);
+    if((uint64_t)(at+count)*8>size) return unsupported(s,__LINE__);
     unsigned end=at+count;
+    unsigned instruction_slots[5];
     while(at<end) {
         Instruction ins[5]; uint32_t value[5],args[5][3]={{0}};
         unsigned n=0,units=0,literal_words=0;
         do {
-            if(n==5 || at==end) return unsupported(__LINE__);
-            Instruction i={le(p+at*8),le(p+at*8+4),0}; ++at;
-            if((i.a>>29)&3 || (i.b>>28)&1) return unsupported(__LINE__); /* per-instruction predication/relative */
+            if(n==5 || at==end) return unsupported(s,__LINE__);
+            Instruction i={le(p+at*8),le(p+at*8+4),0};
+            instruction_slots[n]=at;instruction_context(s,at,i.a,i.b,opcode(i));++at;
+            if((i.a>>29)&3 || (i.b>>28)&1) return unsupported(s,__LINE__); /* per-instruction predication/relative */
             if(predicate_op(i)) {
                 /* Structured PUSH predicates have no GPR/OMOD/clamp output.
                    Standalone predicate-only execution is not implemented. */
-                if(((b>>26)&15)!=9 || (i.b&0x80000070u) || (i.b&12)!=12) return unsupported(__LINE__);
-            } else if(!op3(i) && (i.b&12)) return unsupported(__LINE__);
+                if(((b>>26)&15)!=9 || (i.b&0x80000070u) || (i.b&12)!=12) return unsupported(s,__LINE__);
+            } else if(!op3(i) && (i.b&12)) return unsupported(s,__LINE__);
             if(!op3(i) && (opcode(i)==0x16 || opcode(i)==0x18) && (i.b&0x80000070u))
-                return unsupported(__LINE__); /* MOVA has no GPR write or output modifiers. */
+                return unsupported(s,__LINE__); /* MOVA has no GPR write or output modifiers. */
             i.unit=scalar_unit(i)?4:(i.b>>29)&3;
             if(units&(1u<<i.unit)) i.unit=4;
-            if(units&(1u<<i.unit)) return unsupported(__LINE__);
+            if(units&(1u<<i.unit)) return unsupported(s,__LINE__);
             units|=1u<<i.unit;
             for(unsigned src=0;src<source_count(i);++src)
                 if(select_source(i,src)==253 && source_channel(i,src)+1>literal_words)
@@ -276,29 +300,32 @@ static bool clause(State* s,const uint8_t* p,size_t size,uint32_t a,uint32_t b) 
             ins[n++]=i;
         } while(!(ins[n-1].a>>31));
         unsigned literal_slots=(literal_words+1)/2;
-        if(literal_slots>end-at) return unsupported(__LINE__);
+        if(literal_slots>end-at) return unsupported(s,__LINE__);
         uint32_t literals[4]={0};
         for(unsigned j=0;j<literal_slots*2;++j) literals[j]=le(p+at*8+j*4);
         at+=literal_slots;
-        for(unsigned j=0;j<n;++j)
-            for(unsigned src=0;src<source_count(ins[j]);++src)
-                if(!source(s,ins[j],src,a,b,literals,&args[j][src])) return unsupported(__LINE__);
         for(unsigned j=0;j<n;++j) {
+            instruction_context(s,instruction_slots[j],ins[j].a,ins[j].b,opcode(ins[j]));
+            for(unsigned src=0;src<source_count(ins[j]);++src)
+                if(!source(s,ins[j],src,a,b,literals,&args[j][src])) return unsupported(s,__LINE__);
+        }
+        for(unsigned j=0;j<n;++j) {
+            instruction_context(s,instruction_slots[j],ins[j].a,ins[j].b,opcode(ins[j]));
             unsigned op=opcode(ins[j]);
             if(!op3(ins[j]) && (op==0x50 || op==0x51)) {
-                if(n<4 || ins[j].unit>=4) return unsupported(__LINE__);
+                if(n<4 || ins[j].unit>=4) return unsupported(s,__LINE__);
                 float dot=0;
                 for(unsigned k=0;k<4;++k) {
-                    if(op3(ins[k]) || opcode(ins[k])!=op || ins[k].unit!=k) return unsupported(__LINE__);
+                    if(op3(ins[k]) || opcode(ins[k])!=op || ins[k].unit!=k) return unsupported(s,__LINE__);
                     dot+=multiply(as_float(args[k][0]),as_float(args[k][1]),op==0x51);
                 }
                 value[j]=as_bits(dot);
-            } else if(!evaluate(ins[j],args[j],&value[j])) return unsupported(__LINE__);
+            } else if(!evaluate(s,ins[j],args[j],&value[j])) return unsupported(s,__LINE__);
             if(s->trace_alu) fprintf(stderr,"latte: group=%u lane=%u op=%X src=%08X,%08X,%08X result=%08X\n",
                 at,ins[j].unit,op,args[j][0],args[j][1],args[j][2],value[j]);
             unsigned omod=op3(ins[j])?0:(ins[j].b>>5)&3;
             bool clamp=(ins[j].b>>31)!=0;
-            if(integer_result(ins[j]) && (omod || clamp)) return unsupported(__LINE__);
+            if(integer_result(ins[j]) && (omod || clamp)) return unsupported(s,__LINE__);
             if(omod || clamp) {
                 float f=as_float(value[j]);
                 if(omod==1) f*=2; else if(omod==2) f*=4; else if(omod==3) f*=0.5f;
@@ -336,12 +363,14 @@ static bool fetch_uniform_clause(State* s,const uint8_t* program,size_t size,uin
     unsigned count=((b>>10)&7)+(((b>>19)&1)<<3)+1;
     uint64_t start=(uint64_t)a*8;
     if((b&7) || ((b>>8)&3) || start+(uint64_t)count*16>size)
-        return unsupported(__LINE__);
+        return unsupported(s,__LINE__);
     if(!s->active) return true;
     for(unsigned i=0;i<count;++i) {
         const uint8_t* p=program+(size_t)start+i*16;
         uint32_t w0=le(p),w1=le(p+4),w2=le(p+8);
         unsigned tex_op=w0&31;
+        instruction_context(s,(unsigned)(start/8+i*2),w0,w1,tex_op);
+        if(s->failure){s->failure->detail0=w2;s->failure->detail1=le(p+12);}
         if(tex_op==4) { /* GET_TEXTURE_RESINFO returns integer dimensions. */
             unsigned texture=(w0>>8)&255,src=(w0>>16)&127,dst=w1&127;
             unsigned component=(w2>>20)&7;
@@ -349,34 +378,42 @@ static bool fetch_uniform_clause(State* s,const uint8_t* program,size_t size,uin
             if((w0&0xFF8000E0u) || (w1&0x0FE00180u) || (w2&0xFFFFFu) ||
                component>=4 || texture>=32 || !(s->valid[src]&(1u<<component)) ||
                !s->inputs->texture_info || !s->inputs->texture_info(s->inputs->texture_user,
-                   texture,s->r[src][component],result))return unsupported(__LINE__);
+                   texture,s->r[src][component],result))return unsupported(s,__LINE__);
             for(unsigned c=0;c<4;++c) {
                 unsigned sel=(w1>>(9+c*3))&7;
                 if(sel==7)continue;
-                if(sel>=4)return unsupported(__LINE__);
+                if(sel>=4)return unsupported(s,__LINE__);
                 s->r[dst][c]=result[sel];s->valid[dst]|=1u<<c;
             }
             continue;
         }
         if(tex_op==0x10 || tex_op==0x11 || tex_op==0x13) {
             unsigned texture=(w0>>8)&255,sampler=(w2>>15)&31,src=(w0>>16)&127,dst=w1&127;
-            unsigned x=(w2>>20)&7,y=(w2>>23)&7,w=(w2>>29)&7;
+            unsigned x=(w2>>20)&7,y=(w2>>23)&7,z=(w2>>26)&7,w=(w2>>29)&7;
             if((w0&0xFF8000E0u) || (w1&0x0FE00180u) || (w1&0x30000000u)!=0x30000000u ||
                (w2&32767) || x>=4 || y>=4 || texture>=32 ||
-               !(s->valid[src]&(1u<<x)) || !(s->valid[src]&(1u<<y)) || !s->inputs->sample_texture)
-                return unsupported(__LINE__);
+               !(s->valid[src]&(1u<<x)) || !(s->valid[src]&(1u<<y)) ||
+               (!s->inputs->sample_texture && !s->inputs->sample_texture_layer))
+                return unsupported(s,__LINE__);
             /* Implicit derivatives do not exist in a vertex shader: SAMPLE
                uses level zero, while SAMPLE_L reads the explicit W selector. */
             float lod=0,result[4];
             if(tex_op==0x11) {
-                if(w>=4 || !(s->valid[src]&(1u<<w)))return unsupported(__LINE__);
+                if(w>=4 || !(s->valid[src]&(1u<<w)))return unsupported(s,__LINE__);
                 lod=as_float(s->r[src][w]);
             }
-            if(!s->inputs->sample_texture(s->inputs->texture_user,texture,sampler,
-                as_float(s->r[src][x]),as_float(s->r[src][y]),lod,result))return unsupported(__LINE__);
+            bool sampled;
+            if(s->inputs->sample_texture_layer) {
+                float layer=NAN;
+                if(z<4 && (s->valid[src]&(1u<<z)) && !(w1&(1u<<30)))layer=as_float(s->r[src][z]);
+                sampled=s->inputs->sample_texture_layer(s->inputs->texture_user,texture,sampler,
+                    as_float(s->r[src][x]),as_float(s->r[src][y]),layer,lod,result);
+            } else sampled=s->inputs->sample_texture(s->inputs->texture_user,texture,sampler,
+                as_float(s->r[src][x]),as_float(s->r[src][y]),lod,result);
+            if(!sampled)return unsupported_reason(s,__LINE__,"vertex texture sample unsupported by bound view");
             for(unsigned c=0;c<4;++c) {
                 unsigned sel=(w1>>(9+c*3))&7;
-                if(sel==7)continue;if(sel==6)return unsupported(__LINE__);
+                if(sel==7)continue;if(sel==6)return unsupported(s,__LINE__);
                 s->r[dst][c]=sel<4?as_bits(result[sel]):sel==5?0x3f800000u:0;
                 s->valid[dst]|=1u<<c;
             }
@@ -389,99 +426,123 @@ static bool fetch_uniform_clause(State* s,const uint8_t* program,size_t size,uin
            The fourth instruction word is padding (often compiler garbage). */
         if((w0&0xfc8000ffu)!=0x3c000040u || bank<0x80 || bank>=0x90 ||
            (w1&0xffe00180u)!=0x00200000u || w2!=0x00080000u)
-            return unsupported(__LINE__);
-        if(!(s->valid[src]&(1u<<component))) return unsupported(__LINE__);
+            return unsupported(s,__LINE__);
+        if(!(s->valid[src]&(1u<<component))) return unsupported(s,__LINE__);
         uint64_t offset=(uint64_t)s->r[src][component]*16;
         const uint8_t* block=s->inputs->blocks[bank-0x80];
-        if(!block || offset+16>s->inputs->block_sizes[bank-0x80]) return unsupported(__LINE__);
+        if(!block || offset+16>s->inputs->block_sizes[bank-0x80]) {
+            if(s->failure){s->failure->detail0=bank-0x80;s->failure->detail1=(uint32_t)offset;}
+            return unsupported_reason(s,__LINE__,"VFETCH uniform block missing or indexed read out of bounds");
+        }
         uint32_t values[4];for(unsigned c=0;c<4;++c)values[c]=le(block+(size_t)offset+c*4);
         for(unsigned c=0;c<4;++c) {
             unsigned sel=(w1>>(9+c*3))&7;
             if(sel==7) continue;
-            if(sel==6) return unsupported(__LINE__);
+            if(sel==6) return unsupported(s,__LINE__);
             s->r[dst][c]=sel<4?values[sel]:sel==5?0x3f800000u:0;
             s->valid[dst]|=1u<<c;
         }
     }
     return true;
 }
-bool wiiu_latte_execute_vertex(const uint8_t* program,size_t size,
-    const WiiULatteVertexInputs* inputs,WiiULatteVertexOutputs* outputs) {
-    if(!program || !inputs || !outputs || size<8 || size>1048576 || size%8) return unsupported(__LINE__);
-    State s={0}; s.inputs=inputs;s.active=true;
-    const char* trace=getenv("BOTW_LATTE_TRACE");s.trace_alu=trace && *trace=='2';
+bool wiiu_latte_execute_vertex_diagnostic(const uint8_t* program,size_t size,
+    const WiiULatteVertexInputs* inputs,WiiULatteVertexOutputs* outputs,
+    WiiULatteVertexFailure* failure) {
+    State storage={0};State* s=&storage;s->failure=failure;
+    if(failure) {
+        memset(failure,0,sizeof(*failure));failure->cf_slot=failure->instruction_slot=UINT32_MAX;
+        failure->source_index=failure->source_select=failure->source_channel=UINT32_MAX;
+    }
+    if(!program || !inputs || !outputs || size<8 || size>1048576 || size%8) return unsupported(s,__LINE__);
+    s->inputs=inputs;s->active=true;
+    const char* trace=getenv("BOTW_LATTE_TRACE");s->trace_alu=trace && *trace=='2';
     bool stack[32];unsigned depth=0;
-    memcpy(s.r,inputs->gpr,sizeof(s.r)); memcpy(s.valid,inputs->valid,sizeof(s.valid));
+    memcpy(s->r,inputs->gpr,sizeof(s->r)); memcpy(s->valid,inputs->valid,sizeof(s->valid));
     WiiULatteVertexOutputs out={0};
     for(unsigned cf=0;cf<size/8 && cf<1024;++cf) {
         uint32_t a=le(program+cf*8),b=le(program+cf*8+4);
         unsigned op=(b>>23)&127;
+        if(failure)failure->cf_slot=cf;
+        instruction_context(s,cf,a,b,op);
         if(op>=64) {
             unsigned alu=(b>>26)&15;
-            if(alu<8 || alu>11) return unsupported(__LINE__);
+            if(alu<8 || alu>11) return unsupported(s,__LINE__);
             if(alu==9) {
-                if(depth==32) return unsupported(__LINE__);
-                stack[depth++]=s.active;
+                if(depth==32) return unsupported(s,__LINE__);
+                stack[depth++]=s->active;
             }
-            if(s.active && !clause(&s,program,size,a,b)) return unsupported(__LINE__);
+            if(s->active && !clause(s,program,size,a,b)) return unsupported(s,__LINE__);
             unsigned pops=alu>=10?alu-9:0;
-            if(pops>depth) return unsupported(__LINE__);
-            if(pops) {depth-=pops;s.active=stack[depth];}
+            if(pops>depth) return unsupported(s,__LINE__);
+            if(pops) {depth-=pops;s->active=stack[depth];}
             continue;
         }
         if(op==0xa || op==0xd || op==0xe) {
             unsigned pops=b&7;
-            if(((b>>8)&3) || (b&(1u<<21)) || !depth || pops>depth) return unsupported(__LINE__);
+            if(((b>>8)&3) || (b&(1u<<21)) || !depth || pops>depth) return unsupported(s,__LINE__);
             if(op==0xe) {
-                if(!pops) return unsupported(__LINE__);
-                depth-=pops;s.active=stack[depth];continue;
+                if(!pops) return unsupported(s,__LINE__);
+                depth-=pops;s->active=stack[depth];continue;
             }
             /* Only forward structured branches. No arbitrary jumps/loops. */
-            if(a<=cf || a>=size/8 || a>=1024) return unsupported(__LINE__);
-            if(op==0xd) s.active=stack[depth-1] && !s.active;
-            if(!s.active) {
-                if(pops) {depth-=pops;s.active=stack[depth];}
+            if(a<=cf || a>=size/8 || a>=1024) return unsupported(s,__LINE__);
+            if(op==0xd) s->active=stack[depth-1] && !s->active;
+            if(!s->active) {
+                if(pops) {depth-=pops;s->active=stack[depth];}
                 cf=a-1;
             }
             continue;
         }
         if(op==1) {
-            if(!fetch_uniform_clause(&s,program,size,a,b)) return unsupported(__LINE__);
+            if(!fetch_uniform_clause(s,program,size,a,b)) return unsupported(s,__LINE__);
         } else if(op==0 || op==0x13) {
-            if((b&7) || ((b>>8)&3)) return unsupported(__LINE__);
+            if((b&7) || ((b>>8)&3)) return unsupported(s,__LINE__);
         } else if(op==0x27 || op==0x28) {
-            if(!s.active) return unsupported(__LINE__);
+            if(!s->active) return unsupported(s,__LINE__);
             unsigned type=(a>>13)&3,base=a&8191,reg=(a>>15)&127;
-            if(((a>>22)&255) || ((b>>17)&15)) return unsupported(__LINE__);
+            if(((a>>22)&255) || ((b>>17)&15)) return unsupported(s,__LINE__);
             float* dst; uint8_t* mask;
             if(type==1 && base==60) { dst=out.position;mask=&out.position_mask; }
             else if(type==2 && base<32) { dst=out.parameters[base];mask=&out.parameter_mask[base]; }
-            else return unsupported(__LINE__);
+            else return unsupported(s,__LINE__);
             for(unsigned c=0;c<4;++c) {
                 unsigned sel=(b>>(c*3))&7;
                 if(sel==7) continue;
                 if(sel<4) {
-                    if(!(s.valid[reg]&(1u<<sel))) {
+                    if(!(s->valid[reg]&(1u<<sel))) {
                         /* Compilers leave unused varying components undefined.
                            Preserve the missing-component mask; consumers must
                            validate only the components their PS actually reads. */
                         if(type==2) continue;
-                        return unsupported(__LINE__);
+                        if(failure) {
+                            failure->source_select=reg;failure->source_channel=sel;
+                            failure->detail0=s->valid[reg];failure->detail1=c;
+                        }
+                        return unsupported_reason(s,__LINE__,"uninitialized exported position component");
                     }
-                    dst[c]=as_float(s.r[reg][sel]);
+                    dst[c]=as_float(s->r[reg][sel]);
                 } else if(sel==4 || sel==5) dst[c]=sel==5?1.0f:0.0f;
-                else return unsupported(__LINE__);
+                else return unsupported(s,__LINE__);
                 if(!isfinite(dst[c])) {
                     if(type==2) {dst[c]=0;continue;}
-                    return unsupported(__LINE__);
+                    if(failure) {
+                        failure->source_select=reg;failure->source_channel=sel;
+                        failure->detail0=as_bits(dst[c]);failure->detail1=c;
+                    }
+                    return unsupported_reason(s,__LINE__,"nonfinite exported position");
                 }
                 *mask|=1u<<c;
             }
-        } else return unsupported(__LINE__);
+        } else return unsupported(s,__LINE__);
         if(b&(1u<<21)) {
-            if(depth || out.position_mask!=15) return unsupported(__LINE__);
+            if(depth || out.position_mask!=15) return unsupported(s,__LINE__);
             *outputs=out; return true;
         }
     }
-    return unsupported(__LINE__); /* unterminated or unsupported control flow */
+    return unsupported(s,__LINE__); /* unterminated or unsupported control flow */
+}
+
+bool wiiu_latte_execute_vertex(const uint8_t* program,size_t size,
+    const WiiULatteVertexInputs* inputs,WiiULatteVertexOutputs* outputs) {
+    return wiiu_latte_execute_vertex_diagnostic(program,size,inputs,outputs,NULL);
 }

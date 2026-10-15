@@ -390,9 +390,18 @@ static float half_float(u16 h) {
         exponent?ldexpf(1.0f+mantissa/1024.0f,(int)exponent-15):ldexpf((float)mantissa,-24);
     return h&0x8000?-value:value;
 }
+static float unsigned_float(u32 bits,unsigned mantissa_bits) {
+    unsigned exponent=bits>>mantissa_bits,mantissa=bits&((1u<<mantissa_bits)-1u);
+    if(exponent==31)return mantissa?NAN:INFINITY;
+    return exponent?ldexpf(1.0f+(float)mantissa/(1u<<mantissa_bits),(int)exponent-15):
+        ldexpf((float)mantissa,1-15-(int)mantissa_bits);
+}
 static bool float_texel(const u8* data,const WiiUGX2TextureView* t,u32 x,u32 y,float out[4]) {
     unsigned channels=0,bytes=0;
     switch(t->format) {
+    case 5:channels=1;bytes=2;break;
+    case 0x1f:channels=4;bytes=2;break;
+    case 0x816:channels=1;bytes=4;break;
     case 0x806:channels=1;bytes=2;break;
     case 0x810:channels=2;bytes=2;break;
     case 0x820:channels=4;bytes=2;break;
@@ -412,8 +421,14 @@ static bool float_texel(const u8* data,const WiiUGX2TextureView* t,u32 x,u32 y,f
     u32 offset=texture_offset(x,y,t->first_slice,channels*bytes*8,pitch,height,t->tile_mode,t->swizzle);
     if(offset>t->image_size || channels*bytes>t->image_size-offset)return false;
     float rgba[4]={0,0,0,1};
-    for(unsigned c=0;c<channels;++c) {
-        if(bytes==2)rgba[c]=half_float(read_le16(data+offset+c*2));
+    if(t->format==0x816) {
+        u32 packed=read_le32(data+offset);
+        rgba[0]=unsigned_float(packed&2047,6);
+        rgba[1]=unsigned_float((packed>>11)&2047,6);
+        rgba[2]=unsigned_float(packed>>22,5);
+    } else for(unsigned c=0;c<channels;++c) {
+        if(t->format==5 || t->format==0x1f)rgba[c]=read_le16(data+offset+c*2)/65535.0f;
+        else if(bytes==2)rgba[c]=half_float(read_le16(data+offset+c*2));
         else {u32 bits=read_le32(data+offset+c*4);memcpy(&rgba[c],&bits,4);}
     }
     for(unsigned c=0;c<4;++c) {
@@ -430,10 +445,20 @@ static int sample_address(int coordinate,int extent,unsigned mode) {
     if(mode==3){if(coordinate<0)coordinate=-1-coordinate;return coordinate>=extent?extent-1:coordinate;}
     return coordinate<0 || coordinate>=extent?-1:coordinate; /* border */
 }
+bool wiiu_gx2_software_decode_float(CPUState* cpu,const WiiUGX2TextureView* t,float* rgba) {
+    if(!cpu || !t || !rgba || !t->width || !t->height || t->width>8192 || t->height>8192 ||
+       t->depth!=1 || t->first_slice)return false;
+    const u8* data=texture_data(cpu,t);if(!data)return false;
+    for(u32 y=0;y<t->height;++y)for(u32 x=0;x<t->width;++x)
+        if(!float_texel(data,t,x,y,rgba+((size_t)y*t->width+x)*4))return false;
+    return true;
+}
 static bool sample_float_data(const u8* data,unsigned native_layout,const WiiUGX2TextureView* t,
     u32 word,float u,float v,float out[4]) {
     if(!data || !t || !out || !t->width || !t->height || t->width>65536 || t->height>65536 ||
-       t->depth!=1 || t->first_slice || !isfinite(u) || !isfinite(v) || fabsf(u)>16384 || fabsf(v)>16384)return false;
+       !t->depth || t->first_slice>=t->depth ||
+       (native_layout && (t->depth!=1 || t->first_slice)) ||
+       !isfinite(u) || !isfinite(v) || fabsf(u)>16384 || fabsf(v)>16384)return false;
     unsigned mx=word&7,my=(word>>3)&7,mag=(word>>9)&7,min=(word>>12)&7,border=(word>>22)&3;
     if((mx>3 && mx!=6) || (my>3 && my!=6) || border==3 ||
        (mag!=0 && mag!=1 && mag!=4 && mag!=5) || (min!=0 && min!=1 && min!=4 && min!=5))return false;

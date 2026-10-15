@@ -295,6 +295,8 @@ static u32 g_boot_history_count;
 /* Opt-in integration diagnostic: one ordinary GamePad A press after a chosen
    number of rendered-frame input samples. Never enabled by normal launches. */
 static u32 g_test_start_sample;
+static u32 g_test_a_samples[32];
+static u32 g_test_a_count;
 static bool g_test_start_pro;
 static bool g_pro_controller_input;
 static u32 g_test_input_samples;
@@ -581,6 +583,33 @@ void wiiu_imports_reset_stats(void) {
     g_boot_history_count = 0;
     const char* test_start = getenv("BOTW_TEST_START_SAMPLE");
     g_test_start_sample = test_start ? (u32)strtoul(test_start, NULL, 0) : 0u;
+    /* Optional bounded controller-only probe. Each listed sample holds A for
+       three polls; this never changes scene flags or guest object positions. */
+    g_test_a_count = 0;
+    const char* scheduled = getenv("BOTW_TEST_A_SAMPLES");
+    if (scheduled && *scheduled) {
+        const char* cursor = scheduled;
+        bool valid = true;
+        while (*cursor && valid) {
+            char* end;
+            unsigned long value = strtoul(cursor, &end, 10);
+            if (end == cursor || value == 0 || value > UINT32_MAX - 3u ||
+                g_test_a_count == 32 || (*end && *end != ',') ||
+                (g_test_a_count && value <= g_test_a_samples[g_test_a_count-1] + 3u)) {
+                valid = false; break;
+            }
+            g_test_a_samples[g_test_a_count++] = (u32)value;
+            cursor = *end ? end+1 : end;
+            if (*end && !*cursor) valid = false;
+        }
+        if (!valid) {
+            g_test_a_count = 0;
+            fprintf(stderr, "input-probe: invalid BOTW_TEST_A_SAMPLES; schedule disabled\n");
+        } else if (g_test_a_count) {
+            g_test_start_sample = g_test_a_samples[0];
+            fprintf(stderr, "input-probe: loaded %u bounded A presses\n", g_test_a_count);
+        }
+    }
     const char* test_pro = getenv("BOTW_TEST_START_PRO");
     g_test_start_pro = test_pro && strcmp(test_pro, "1") == 0;
     const char* controller = getenv("BOTW_CONTROLLER");
@@ -5112,6 +5141,14 @@ static u32 map_pro_buttons_to_host(u32 buttons) {
     return mapped;
 }
 
+static u32 test_a_start_for_sample(u32 sample) {
+    if (!g_test_a_count) return g_test_start_sample;
+    for (u32 i=0; i<g_test_a_count; ++i)
+        if (sample >= g_test_a_samples[i] && sample <= g_test_a_samples[i]+3u)
+            return g_test_a_samples[i];
+    return 0;
+}
+
 static void write_virtual_pro_status(CPUState* cpu, u32 data) {
     u32 held = 0u;
     u32 pressed = 0u;
@@ -5126,14 +5163,15 @@ static void write_virtual_pro_status(CPUState* cpu, u32 data) {
 
     if (g_test_start_sample && g_test_start_pro && wiiu_gx2_has_active_frame()) {
         u32 sample = g_test_input_samples + 1u; /* KPAD is polled before VPAD. */
-        if (sample >= g_test_start_sample && sample < g_test_start_sample + 3u) {
+        u32 start = test_a_start_for_sample(sample);
+        if (start && sample >= start && sample < start + 3u) {
             held |= 0x8000u;
             released &= ~0x8000u;
-            if (sample == g_test_start_sample) {
+            if (sample == start) {
                 pressed |= 0x8000u;
                 fprintf(stderr, "test-start: Pro press A sample=%u\n", sample);
             }
-        } else if (sample == g_test_start_sample + 3u) {
+        } else if (start && sample == start + 3u) {
             released |= 0x8000u;
             fprintf(stderr, "test-start: Pro release A\n");
         }
@@ -5287,16 +5325,17 @@ static bool handle_input_import(CPUState* cpu, const char* name) {
                             g_test_input_samples);
                     wiiu_imports_dump_threads(cpu);
                 }
-                if (!g_test_start_pro && g_test_input_samples >= g_test_start_sample &&
-                    g_test_input_samples < g_test_start_sample + 3u) {
+                u32 start = test_a_start_for_sample(g_test_input_samples);
+                if (!g_test_start_pro && start && g_test_input_samples >= start &&
+                    g_test_input_samples < start + 3u) {
                     held |= 0x8000u;
                     released &= ~0x8000u;
-                    if (g_test_input_samples == g_test_start_sample) {
+                    if (g_test_input_samples == start) {
                         pressed |= 0x8000u;
                         fprintf(stderr, "test-start: press A at input sample=%u\n",
                                 g_test_input_samples);
                     }
-                } else if (!g_test_start_pro && g_test_input_samples == g_test_start_sample + 3u) {
+                } else if (!g_test_start_pro && start && g_test_input_samples == start + 3u) {
                     released |= 0x8000u;
                     fprintf(stderr, "test-start: release A\n");
                 }
@@ -7950,9 +7989,15 @@ static void initialize_host_thread_context(HostThread* thread,
 
 static void log_host_thread_progress(HostThread* thread) {
     CPUState* cpu = &thread->cpu;
-    u32 handler = safe_read32(cpu, thread->argv + 148u);
-    u32 vtable = safe_read32(cpu, handler);
-    u32 callback = safe_read32(cpu, vtable + 12u);
+    /* Thread arguments differ by entry point: this field can be a scalar,
+       rather than an object pointer. Diagnostic reads must not manufacture
+       guest memory faults while reporting an otherwise valid worker. */
+    u32 handler = guest_range_mapped(cpu, thread->argv, 152u)
+                      ? mem_read32(cpu, thread->argv + 148u) : 0u;
+    u32 vtable = guest_range_mapped(cpu, handler, 4u)
+                     ? mem_read32(cpu, handler) : 0u;
+    u32 callback = guest_range_mapped(cpu, vtable, 16u)
+                       ? mem_read32(cpu, vtable + 12u) : 0u;
     fprintf(stderr,
             "coreinit: thread progress object=0x%08X blocks=%llu "
             "pc=0x%08X lr=0x%08X sp=0x%08X handler=0x%08X "

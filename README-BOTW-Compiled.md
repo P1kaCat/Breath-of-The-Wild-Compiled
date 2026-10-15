@@ -4,13 +4,13 @@ Experimental native Windows x64 port of **Breath of the Wild for Wii U**, based 
 
 PowerPC recompilation, the Cafe runtime, and the GX2/Latte shader translator are inherited from CafeRecomp. Rendering of Link and the environment remains incomplete. Building the program or passing GPU tests does not establish that the game is playable.
 
-The recorded runtime suite passes 24 tests. Launching displays the opening screen and introductory text, followed by a solid yellow screen with rejected vertex programs. See the [validation notes](VALIDATION.md). Captures remain local.
+The recorded runtime suite passes 25 tests. Launching displays the opening screen and introductory text. Longer probes load MainField placement and terrain data, but character/environment rendering and playable movement remain unverified. See the [validation notes](VALIDATION.md). Captures remain local.
 
 ## Getting started
 
-Requirements: Visual Studio 2022 with C++ tools and a Windows SDK, CMake, and PowerShell. Building the translator downloads zlib from its official distribution with a pinned SHA-256 checksum.
+Requirements: MSVC C++ tools and a Windows SDK, CMake, and PowerShell. Use Visual Studio 2022 or Ninja from an initialized MSVC developer shell. Building the translator downloads zlib from its official distribution with a pinned SHA-256 checksum.
 
-At the last recorded tooling check, Visual Studio 2022 was no longer installed. The completed build and its binaries are retained locally; rebuilding requires the C++ tools.
+The local workspace now contains a recovered matching compiler, and fresh Ninja Release builds work. This compiler is a local dependency and is not distributed in the repository. For a new Ninja build, pass `-Generator Ninja`; existing directories retain their configured generator. MSBuild-specific arguments are used only for Visual Studio builds.
 
 From this directory:
 
@@ -64,6 +64,18 @@ The full original file is compared before applying an override, preventing an id
 `-Capture` saves diagnostic captures in the same workspace. Game programs, shaders, and generated files remain local and are not added to the repository.
 
 Run a time-limited probe with `run -Blocks 0 -Seconds 120 -Headless -Mute -Capture`. Only the process started by that command is stopped at the deadline; it does not close Cemu. Reaching this deadline is a diagnostic stop, not evidence of a successful full boot.
+
+### Boot investigation
+
+Optional process environment variables support reproducible local probes:
+
+- `BOTW_TRACE_FILES=1`: up to 4,096 file-open results, independent of the normal log budget.
+- `BOTW_WORKER_SLICE=128`: a bounded cooperative worker budget (1–256, default 32). Spinlock fairness rules still apply. This is a diagnostic scheduling option; it is not a frame-rate setting.
+- `BOTW_TEST_START_SAMPLE=120` and `BOTW_TEST_START_PRO=1`: a three-poll logical A press on the Pro Controller after rendering begins.
+- `BOTW_TEST_A_SAMPLES=120,2700,3000`: up to 32 explicit A presses, with neutral gaps. These operate through controller packets and do not change scene flags or actor positions.
+- `BOTW_TRACE_DRAW_FRAME=yellow` together with `-Capture`: capture the material and before/after evidence for the first matching yellow draw. This is expensive and should stay disabled in ordinary launches.
+
+With `-Capture`, the first rejection of each vertex-program signature records assembled inputs, uniform blocks, and failure context. `botw_latte_vertex_failure_replay` accepts the absolute capture prefix to reproduce supported inputs offline. Texture callbacks are explicitly reported as missing dependencies when their sampled data is not recorded; a replay cannot invent those values. Captures contain game-derived data and remain local.
 
 ## Data isolation
 

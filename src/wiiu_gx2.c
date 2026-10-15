@@ -68,12 +68,15 @@ typedef struct {
     u32 comp_map;
     u32 first_mip;
     u32 first_slice;
+    u32 num_slices;
+    u32 mip_levels,mipmap_size,mipmaps,mip_offsets[13];
     u32 dimension,aa;
 } GX2HostTexture;
 
 typedef struct {
     bool valid;
     bool dirty;
+    bool floating_pixels;
     GX2HostTexture texture;
     u8* pixels;
     size_t pixel_capacity;
@@ -849,14 +852,19 @@ static bool update_texture(CPUState* cpu, u32 descriptor,
     texture->width = mem_read32(cpu, descriptor + 0x04u);
     texture->height = mem_read32(cpu, descriptor + 0x08u);
     texture->depth = mem_read32(cpu, descriptor + 0x0Cu);
+    texture->mip_levels = mem_read32(cpu, descriptor + 0x10u);
     texture->format = mem_read32(cpu, descriptor + 0x14u);
     texture->image_size = mem_read32(cpu, descriptor + 0x20u);
     texture->image = mem_read32(cpu, descriptor + 0x24u);
+    texture->mipmap_size = mem_read32(cpu, descriptor + 0x28u);
+    texture->mipmaps = mem_read32(cpu, descriptor + 0x2Cu);
     texture->tile_mode = mem_read32(cpu, descriptor + 0x30u);
     texture->swizzle = mem_read32(cpu, descriptor + 0x34u);
     texture->pitch = mem_read32(cpu, descriptor + 0x3Cu);
+    for(u32 level=0;level<13;++level)texture->mip_offsets[level]=mem_read32(cpu,descriptor+0x40u+level*4u);
     texture->first_mip = mem_read32(cpu, descriptor + 0x74u);
     texture->first_slice = mem_read32(cpu, descriptor + 0x7Cu);
+    texture->num_slices = mem_read32(cpu, descriptor + 0x80u);
     texture->comp_map = mem_read32(cpu, descriptor + 0x84u);
     if (texture->width == 0 || texture->height == 0 ||
         texture->width > 16384u || texture->height > 16384u ||
@@ -1317,12 +1325,12 @@ static u64 texture_content_signature(CPUState* cpu,
     return signature;
 }
 
-static GX2DecodedTexture* decode_texture_cached(CPUState* cpu,
-                                                const GX2HostTexture* texture) {
+static GX2DecodedTexture* decode_texture_cached_kind(CPUState* cpu,
+                                                const GX2HostTexture* texture,bool floating_pixels) {
     GX2DecodedTexture* replacement = NULL;
     for (u32 i = 0; i < GX2_DECODED_TEXTURE_LIMIT; i++) {
         GX2DecodedTexture* decoded = &g_decoded_textures[i];
-        if (decoded_texture_matches(decoded, texture)) {
+        if (decoded->floating_pixels==floating_pixels && decoded_texture_matches(decoded, texture)) {
             if (decoded->dirty || decoded->last_signature_frame != g_frame_count) {
                 u64 signature = texture_content_signature(cpu, texture);
                 decoded->last_signature_frame = g_frame_count;
@@ -1351,11 +1359,12 @@ static GX2DecodedTexture* decode_texture_cached(CPUState* cpu,
         }
     }
     if (!replacement || texture->width == 0u || texture->height == 0u ||
-        texture->height > SIZE_MAX / texture->width / 4u) {
+        texture->height > SIZE_MAX / texture->width / (floating_pixels?16u:4u)) {
         return NULL;
     }
 
-    size_t required = (size_t)texture->width * texture->height * 4u;
+    size_t required = (size_t)texture->width * texture->height * (floating_pixels?16u:4u);
+    if(floating_pixels && required>64u*1024u*1024u)return NULL;
     if (required > replacement->pixel_capacity) {
         u8* pixels = (u8*)realloc(replacement->pixels, required);
         if (!pixels)
@@ -1409,15 +1418,18 @@ static GX2DecodedTexture* decode_texture_cached(CPUState* cpu,
             }
         }
     }
-    if (!wiiu_gx2_software_blit(cpu, &view, replacement->pixels,
+    bool decoded_ok=floating_pixels?wiiu_gx2_software_decode_float(cpu,&view,(float*)replacement->pixels):
+        wiiu_gx2_software_blit(cpu, &view, replacement->pixels,
                                 texture->width, texture->height,
                                 texture->width * 4u, 0u, 0u, texture->width,
-                                texture->height, false)) {
+                                texture->height, false);
+    if (!decoded_ok) {
         replacement->valid = false;
         return NULL;
     }
 
     replacement->valid = true;
+    replacement->floating_pixels=floating_pixels;
     replacement->dirty = false;
     replacement->texture = *texture;
     replacement->serial = ++g_decoded_texture_serial;
@@ -1432,6 +1444,9 @@ static GX2DecodedTexture* decode_texture_cached(CPUState* cpu,
                 texture->format, texture->tile_mode);
     }
     return replacement;
+}
+static GX2DecodedTexture* decode_texture_cached(CPUState* cpu,const GX2HostTexture* texture) {
+    return decode_texture_cached_kind(cpu,texture,false);
 }
 
 static void invalidate_decoded_textures(u32 address, u32 size) {
@@ -3270,6 +3285,79 @@ static struct {
 } g_scene_programs[256];
 static u64 g_scene_program_serial;
 
+/* The normal variant capture predates mutable shader inputs. Preserve the
+   assembled failing vertex so later-frame failures can be replayed exactly.
+   These local-only files are bounded and never written during normal runs. */
+static void capture_vertex_failure(CPUState* cpu,const u8* program,u32 size,
+    const WiiULatteVertexInputs* inputs,const WiiULatteVertexFailure* failure,
+    u32 vertex_index,u32 instance_index) {
+    const char* directory=getenv("BOTW_CAPTURE_DIR");
+    if(!directory || !*directory)return;
+    static struct {u32 hash,size;} seen[64];
+    static u32 used;
+    u32 hash=2166136261u;
+    for(u32 i=0;i<size;++i)hash=(hash^program[i])*16777619u;
+    for(u32 i=0;i<used;++i)if(seen[i].hash==hash && seen[i].size==size)return;
+    if(used==64)return;
+    u32 id=used++;seen[id].hash=hash;seen[id].size=size;
+    char name[128];
+    char fetch_label[64];snprintf(fetch_label,sizeof(fetch_label),"vertex_failure_%02u_fetch",id);
+    dump_guide_shader(cpu,fetch_label,g_current_fetch_shader,0x20u,8u,12u);
+    snprintf(name,sizeof(name),"vertex_failure_%02u_meta.txt",id);
+    FILE* meta=open_capture_file(name);if(!meta)return;
+    fprintf(meta,"version 1\nprogram_size %u\nuniform_count %u\n",size,inputs->uniform_count);
+    fprintf(meta,"frame %llu\nvertex_index %u\ninstance_index %u\nvs %08X\nps %08X\nprogram_fnv %08X\n",
+        (unsigned long long)g_frame_count,vertex_index,instance_index,
+        g_current_vertex_shader,g_current_pixel_shader,hash);
+    fprintf(meta,"failure_line %u\ncf_slot %u\ninstruction_slot %u\nword0 %08X\nword1 %08X\nopcode %X\nsource_index %u\nsource_select %u\nsource_channel %u\ndetail0 %08X\ndetail1 %08X\nreason %s\n",
+        failure->line,failure->cf_slot,failure->instruction_slot,failure->word0,
+        failure->word1,failure->opcode,failure->source_index,failure->source_select,
+        failure->source_channel,failure->detail0,failure->detail1,failure->reason);
+    fprintf(meta,"sample_texture_callback %u\ntexture_info_callback %u\n",
+        inputs->sample_texture!=NULL,inputs->texture_info!=NULL);
+    for(u32 slot=0;slot<GX2_TEXTURE_UNIT_LIMIT;++slot)if(g_vertex_textures[slot].valid) {
+        const GX2HostTexture* t=&g_vertex_textures[slot];
+        fprintf(meta,"vertex_texture %u descriptor %08X image %08X size %u dimensions %u %u %u format %X tile %u pitch %u first_mip %u first_slice %u slices %u dimension %u\n",
+            slot,t->descriptor,t->image,t->image_size,t->width,t->height,t->depth,
+            t->format,t->tile_mode,t->pitch,t->first_mip,t->first_slice,t->num_slices,t->dimension);
+    }
+    bool complete=true;
+#define FAILURE_BUFFER(suffix,data,bytes) do { \
+    snprintf(name,sizeof(name),"vertex_failure_%02u_" suffix,id); \
+    if(!dump_host_buffer(data,bytes,name))complete=false; \
+} while(0)
+    FAILURE_BUFFER("program.bin",program,size);
+    FAILURE_BUFFER("gpr.bin",inputs->gpr,sizeof(inputs->gpr));
+    FAILURE_BUFFER("valid.bin",inputs->valid,sizeof(inputs->valid));
+    if(inputs->uniform_count && inputs->uniform_count<=GX2_UNIFORM_REGISTER_LIMIT &&
+       inputs->uniforms && inputs->uniform_valid) {
+        FAILURE_BUFFER("uniforms.bin",inputs->uniforms,inputs->uniform_count*sizeof(u32));
+        FAILURE_BUFFER("uniform_valid.bin",inputs->uniform_valid,inputs->uniform_count);
+    } else if(inputs->uniform_count)complete=false;
+    const u8* descriptor=guest_bytes(cpu,g_current_vertex_shader,0x134u);
+    if(descriptor) {FAILURE_BUFFER("descriptor.bin",descriptor,0x134u);}
+    else complete=false;
+    u32 remaining=4u*1024u*1024u;
+    for(u32 slot=0;slot<16;++slot) {
+        u32 requested=inputs->block_sizes[slot],captured=0;
+        if(inputs->blocks[slot] && requested && requested<=remaining) {
+            captured=requested;remaining-=captured;
+            snprintf(name,sizeof(name),"vertex_failure_%02u_block_%02u.bin",id,slot);
+            if(!dump_host_buffer(inputs->blocks[slot],captured,name))complete=false;
+        }
+        /* A NULL mapped pointer is part of the failure state, not a missing
+           capture. A valid pointer whose bytes exceed the budget is partial. */
+        if(inputs->blocks[slot] && requested!=captured)complete=false;
+        fprintf(meta,"block %u %u %u %u %08X\n",slot,requested,captured,
+            inputs->blocks[slot]!=NULL,g_vertex_uniform_blocks[slot].data);
+    }
+#undef FAILURE_BUFFER
+    fprintf(meta,"capture_complete %u\n",complete);fclose(meta);
+    fprintf(stderr,"gx2: vertex failure capture=%u fnv=%08X index=%u instance=%u cf=%u instruction=%u opcode=%X line=%u reason=%s complete=%u\n",
+        id,hash,vertex_index,instance_index,failure->cf_slot,failure->instruction_slot,
+        failure->opcode,failure->line,failure->reason,complete);
+}
+
 static bool scene_rejected(const char* stage,u32 slot) {
     /* One bounded diagnostic per shader/stage, only for capture runs. */
     static struct {u32 vs,ps,slot;const char* stage;} seen[256];
@@ -3282,6 +3370,11 @@ static bool scene_rejected(const char* stage,u32 slot) {
     seen[used].slot=slot;seen[used++].stage=stage;
     fprintf(stderr,"gx2: scene rejected stage=%s slot=%u vs=%08X ps=%08X frame=%llu\n",
         stage,slot,g_current_vertex_shader,g_current_pixel_shader,(unsigned long long)g_frame_count);
+    if(slot<GX2_TEXTURE_UNIT_LIMIT && (!strcmp(stage,"pixel-texture-format") || !strcmp(stage,"pixel-texture-view"))) {
+        const GX2HostTexture* t=&g_pixel_textures[slot];
+        fprintf(stderr,"gx2: rejected texture descriptor=%08X image=%08X format=%X dimensions=%u,%u,%u view=%u mip=%u slice=%u count=%u\n",
+            t->descriptor,t->image,t->format,t->width,t->height,t->depth,t->dimension,t->first_mip,t->first_slice,t->num_slices);
+    }
     return false;
 }
 
@@ -3324,14 +3417,72 @@ static bool vertex_texture_info(void* user,unsigned texture,u32 lod,u32 result[4
 
 bool wiiu_gx2_sample_vertex_texture(void* user,unsigned texture,unsigned sampler,
     float u,float v,float lod,float result[4]) {
+    return wiiu_gx2_sample_vertex_texture_layer(user,texture,sampler,u,v,NAN,lod,result);
+}
+
+static bool sample_array_level(CPUState* cpu,const GX2HostTexture* t,u32 sampler,
+    float u,float v,float layer,u32 level,float result[4]) {
+    if(!isfinite(layer) || !t->num_slices || t->first_slice>=t->depth ||
+       t->num_slices>t->depth-t->first_slice)return false;
+    WiiUGX2TextureView view={t->image,t->image_size,t->width,t->height,t->depth,
+        t->format,t->tile_mode,t->swizzle,t->pitch,t->comp_map,t->first_slice};
+    if(level) {
+        /* Captured terrain arrays use power-of-two thin macrotiles at each
+           mip, with explicit offsets into the separate mip allocation.
+           Smaller/degraded tile modes require their own layout calculation. */
+        if(level>=t->mip_levels || level>13 || t->tile_mode!=4 ||
+           (t->format!=5 && t->format!=0x1f) || t->pitch!=t->width ||
+           (t->width&(t->width-1)) || (t->height&(t->height-1)))return false;
+        view.width=t->width>>level;view.height=t->height>>level;view.pitch=view.width;
+        if(view.width<64 || view.height<16)return false;
+        u32 offset=t->mip_offsets[level-1];
+        u32 end=level+1<t->mip_levels?t->mip_offsets[level]:t->mipmap_size;
+        if(!t->mipmaps || offset>=end || end>t->mipmap_size ||
+           (u64)t->mipmaps+end>0x100000000ull)return false;
+        view.image=t->mipmaps+offset;view.image_size=end-offset;
+    }
+    float selected=fminf((float)(t->num_slices-1u),fmaxf(0,floorf(layer+0.5f)));
+    view.first_slice=t->first_slice+(u32)selected;
+    return wiiu_gx2_software_sample_float(cpu,&view,sampler,u,v,result);
+}
+
+bool wiiu_gx2_sample_vertex_texture_layer(void* user,unsigned texture,unsigned sampler,
+    float u,float v,float layer,float lod,float result[4]) {
     CPUState* cpu=user;
     if(!cpu || texture>=GX2_TEXTURE_UNIT_LIMIT || sampler>=GX2_TEXTURE_UNIT_LIMIT || !isfinite(lod))return false;
     const GX2HostTexture* t=&g_vertex_textures[texture];
     const GX2HostSampler* s=&g_vertex_samplers[sampler];
-    if(!t->valid || !s->valid || t->dimension!=1 || t->aa || t->first_mip)return false;
+    if(!t->valid || !s->valid || (t->dimension!=1 && t->dimension!=5) || t->aa || t->first_mip)return false;
     float minimum=(s->words[1]&1023)/64.0f,maximum=((s->words[1]>>10)&1023)/64.0f;
     if(minimum>maximum)return false;
     lod=fminf(maximum,fmaxf(minimum,lod));
+    if(t->dimension==5) {
+        if(find_color_surface_by_image(t->image)) {
+            static u32 reported[32],count;
+            bool seen=false;for(u32 i=0;i<count;++i)if(reported[i]==t->image)seen=true;
+            if(!seen && count<32 && getenv("BOTW_CAPTURE_DIR")) {
+                reported[count++]=t->image;
+                fprintf(stderr,"gx2: vertex array requires GPU layer readback image=%08X format=%X layer=%g lod=%g\n",
+                    t->image,t->format,layer,lod);
+            }
+            return false;
+        }
+        u32 filter=(s->words[0]>>17)&3;
+        if(filter==3)return false;
+        u32 levels=t->mip_levels?t->mip_levels:1u;
+        if(levels>14)return false;
+        lod=fminf((float)(levels-1),lod);
+        if(!filter)lod=0;
+        if(filter!=2)return sample_array_level(cpu,t,s->words[0],u,v,layer,(u32)floorf(lod+0.5f),result);
+        u32 lower=(u32)floorf(lod),upper=lower+1<levels?lower+1:lower;
+        float fraction=lod-lower;
+        if(!sample_array_level(cpu,t,s->words[0],u,v,layer,lower,result))return false;
+        if(fraction>0 && lower!=upper) {
+            float next[4];if(!sample_array_level(cpu,t,s->words[0],u,v,layer,upper,next))return false;
+            for(u32 c=0;c<4;++c)result[c]+=fraction*(next[c]-result[c]);
+        }
+        return true;
+    }
     if(lod!=0)return false; /* Other mip levels require their own layout/bytes. */
     WiiUGX2TextureView view={t->image,t->image_size,t->width,t->height,t->depth,
         t->format,t->tile_mode,t->swizzle,t->pitch,t->comp_map,t->first_slice};
@@ -3368,6 +3519,107 @@ bool wiiu_gx2_sample_vertex_texture(void* user,unsigned texture,unsigned sampler
         return wiiu_gx2_software_sample_bgra(source->pixels,&view,s->words[0],u,v,result);
     }
     return wiiu_gx2_software_sample_float(cpu,&view,s->words[0],u,v,result);
+}
+
+/* One pending translated draw, retained only while an explicit draw trace is
+   requested. The completed-draw hook consumes it before the next draw. */
+static struct {
+    bool pending,before_valid,finished;
+    CPUState* cpu;
+    u64 frame,serial;
+    u32 target,count,capacity;
+    WiiUWindowSceneMaterial material;
+    WiiUWindowPostVertex* vertices;
+    u8* before_pixels;
+    size_t before_capacity;
+    u8 before_samples[5][4];
+} g_trace_scene;
+
+static void trace_scene_begin(CPUState* cpu,GX2HostColorSurface* target,
+    const WiiUWindowSceneMaterial* material,const WiiUWindowPostVertex* vertices,u32 count) {
+    const char* requested=getenv("BOTW_TRACE_DRAW_FRAME");
+    g_trace_scene.pending=false;
+    if(!requested || !*requested || !getenv("BOTW_CAPTURE_DIR") || count>6144 || g_trace_scene.finished)return;
+    if(strcmp(requested,"yellow") && strtoull(requested,NULL,10)!=g_frame_count)return;
+    if(count>g_trace_scene.capacity) {
+        void* expanded=realloc(g_trace_scene.vertices,(size_t)count*sizeof(*vertices));
+        if(!expanded)return;
+        g_trace_scene.vertices=expanded;g_trace_scene.capacity=count;
+    }
+    g_trace_scene.cpu=cpu;g_trace_scene.frame=g_frame_count;g_trace_scene.target=target->image;
+    g_trace_scene.count=count;g_trace_scene.material=*material;
+    memcpy(g_trace_scene.vertices,vertices,(size_t)count*sizeof(*vertices));
+    g_trace_scene.before_valid=false;
+    size_t bytes=(size_t)target->width*target->height*4;
+    if(target->gpu_composited && bytes && bytes<=16u*1024u*1024u) {
+        if(bytes>g_trace_scene.before_capacity) {
+            void* expanded=realloc(g_trace_scene.before_pixels,bytes);
+            if(expanded) {g_trace_scene.before_pixels=expanded;g_trace_scene.before_capacity=bytes;}
+        }
+        if(bytes<=g_trace_scene.before_capacity && wiiu_window_gpu_readback(target->image,
+            g_trace_scene.before_pixels,target->width,target->height,target->width*4)) {
+            size_t samples[5]={0,target->width-1,
+                (size_t)(target->height/2)*target->width+target->width/2,
+                (size_t)(target->height-1)*target->width,(size_t)target->width*target->height-1};
+            for(u32 i=0;i<5;++i)memcpy(g_trace_scene.before_samples[i],
+                g_trace_scene.before_pixels+samples[i]*4,4);
+            g_trace_scene.before_valid=true;
+        }
+    }
+    g_trace_scene.pending=true;
+}
+
+static void trace_scene_dump(GX2HostColorSurface* target) {
+    if(!g_trace_scene.pending || g_trace_scene.frame!=g_frame_count ||
+       g_trace_scene.target!=target->image || g_trace_scene.serial!=target->draw_serial)return;
+    const WiiUWindowSceneMaterial* material=&g_trace_scene.material;
+    const WiiULattePixelProgram* program=material->program;
+    dump_host_buffer(g_trace_scene.vertices,(size_t)g_trace_scene.count*sizeof(*g_trace_scene.vertices),"yellow_scene_vertices.bin");
+    dump_host_buffer(material->constants,sizeof(material->constants),"yellow_scene_constants.bin");
+    dump_host_buffer(program->hlsl,strlen(program->hlsl),"yellow_scene.hlsl");
+    dump_host_buffer(g_pixel_uniform_registers,sizeof(g_pixel_uniform_registers),"yellow_scene_ps_uniforms.bin");
+    dump_host_buffer(g_pixel_uniform_register_valid,sizeof(g_pixel_uniform_register_valid),"yellow_scene_ps_uniform_valid.bin");
+    dump_host_buffer(g_vertex_uniform_registers,sizeof(g_vertex_uniform_registers),"yellow_scene_vs_uniforms.bin");
+    dump_host_buffer(g_vertex_uniform_register_valid,sizeof(g_vertex_uniform_register_valid),"yellow_scene_vs_uniform_valid.bin");
+    dump_guide_shader(g_trace_scene.cpu,"yellow_scene_ps",g_current_pixel_shader,0xECu,0xA4u,0xA8u);
+    dump_guide_shader(g_trace_scene.cpu,"yellow_scene_vs",g_current_vertex_shader,0x134u,0xD0u,0xD4u);
+    FILE* meta=open_capture_file("yellow_scene_meta.txt");
+    if(meta) {
+        fprintf(meta,"version 1\nframe %llu\nserial %llu\nvertices %u\nvertex_stride %u\nprogram_key %08X\n",
+            (unsigned long long)g_frame_count,(unsigned long long)target->draw_serial,
+            g_trace_scene.count,(unsigned)sizeof(*g_trace_scene.vertices),program->key);
+        fprintf(meta,"viewport %.9g %.9g %.9g %.9g\nscissor %u %u %u %u %u\nbefore_valid %u\n",
+            g_viewport[0],g_viewport[1],g_viewport[2],g_viewport[3],
+            g_scissor_valid,g_scissor[0],g_scissor[1],g_scissor[2],g_scissor[3],g_trace_scene.before_valid);
+        for(u32 i=0;i<5 && g_trace_scene.before_valid;++i) {
+            const u8* p=g_trace_scene.before_samples[i];
+            fprintf(meta,"before_bgra %u %u %u %u %u\n",i,p[0],p[1],p[2],p[3]);
+        }
+        for(u32 i=0;i<program->constant_count;++i) {
+            const u32* p=material->constants[16+i];
+            fprintf(meta,"constant %u bank %u vector %u words %08X %08X %08X %08X\n",
+                i,program->constants[i].bank,program->constants[i].vector,p[0],p[1],p[2],p[3]);
+        }
+        u32 budget=16u*1024u*1024u;
+        for(u32 i=0;i<16;++i)if(program->texture_mask&(1u<<i)) {
+            const WiiUWindowEffectTexture* t=&material->textures[i];
+            size_t bytes=(size_t)t->width*t->height*(t->floating_pixels?16u:4u);
+            bool captured=t->pixels && bytes && bytes<=budget;
+            char name[80];snprintf(name,sizeof(name),"yellow_scene_texture_%u.%s",i,t->floating_pixels?"rgba32f":"bgra");
+            if(captured) {captured=dump_host_buffer(t->pixels,bytes,name);budget-=(u32)bytes;}
+            fprintf(meta,"texture %u source_surface %08X size %u %u serial %llu captured %u sampler %u %08X map %u %u %u %u floating %u\n",
+                i,material->source_surfaces[i],t->width,t->height,(unsigned long long)t->serial,
+                captured,t->sampler_valid,t->sampler_word0,
+                material->constants[i][0],material->constants[i][1],material->constants[i][2],material->constants[i][3],t->floating_pixels);
+        }
+        fclose(meta);
+    }
+    if(g_trace_scene.before_valid) {
+        const u8* p=g_trace_scene.before_samples[2];
+        fprintf(stderr,"gx2: yellow-scene vertices=%u key=%08X before-center-BGRA=%u,%u,%u,%u\n",
+            g_trace_scene.count,program->key,p[0],p[1],p[2],p[3]);
+    }
+    g_trace_scene.pending=false;
 }
 
 static bool draw_scene_material(CPUState* cpu,const WiiULattePixelProgram* program,
@@ -3428,9 +3680,11 @@ static bool draw_scene_material(CPUState* cpu,const WiiULattePixelProgram* progr
             if(!source->gpu_composited)upload_software_surface_to_gpu(source);
             material.source_surfaces[i]=source->image;map=texture->comp_map;
         } else {
-            GX2DecodedTexture* decoded=decode_texture_cached(cpu,texture);
+            bool numeric=texture->format==5 || texture->format==0x1f || (texture->format&0x800u)!=0;
+            GX2DecodedTexture* decoded=decode_texture_cached_kind(cpu,texture,numeric);
             if(!decoded || !decoded->pixels)return scene_rejected("pixel-texture-format",i);
             material.textures[i].pixels=decoded->pixels;material.textures[i].serial=decoded->serial;
+            material.textures[i].floating_pixels=decoded->floating_pixels;
             material.textures[i].width=texture->width;material.textures[i].height=texture->height;
         }
         for(u32 c=0;c<4;++c) {
@@ -3447,12 +3701,14 @@ static bool draw_scene_material(CPUState* cpu,const WiiULattePixelProgram* progr
         if(!ensure_color_surface_pixels(targets[i]))return false;
         upload_software_surface_to_gpu(targets[i]);
     }
+    trace_scene_begin(cpu,target,&material,vertices,count);
     bool drawn=wiiu_window_gpu_draw_scene(target->image,target->width,target->height,&material,
         vertices,count,viewport,&g_blend_controls[0],g_scissor_valid,
         g_scissor[0],g_scissor[1],g_scissor[2],g_scissor[3]);
     if(drawn)for(u32 i=0;i<8;++i)if(targets[i]) {
         targets[i]->cpu_pixels_stale=true;targets[i]->drawn=true;targets[i]->draw_serial=++g_draw_serial;
     }
+    if(g_trace_scene.pending)g_trace_scene.serial=target->draw_serial;
     return drawn;
 }
 
@@ -3531,6 +3787,7 @@ static int draw_postprocess(CPUState* cpu,u32 primitive,u32 count,u32 first_vert
        !target->width || !target->height) return false;
     WiiULatteVertexInputs inputs={0};
     inputs.sample_texture=wiiu_gx2_sample_vertex_texture;
+    inputs.sample_texture_layer=wiiu_gx2_sample_vertex_texture_layer;
     inputs.texture_info=vertex_texture_info;
     inputs.texture_user=cpu;
     inputs.uniforms=g_vertex_uniform_registers;
@@ -3581,12 +3838,18 @@ static int draw_postprocess(CPUState* cpu,u32 primitive,u32 count,u32 first_vert
         for(u32 j=0;j<32;++j) {
             u32 semantic=mem_read32(cpu,g_current_vertex_shader+0x44+j*4);
             if(semantic<128 && fetched.valid[semantic]) {
-                memcpy(inputs.gpr[j+1],fetched.gpr[semantic],16);
+                memcpy(inputs.gpr[j+1],fetched.words[semantic],16);
                 inputs.valid[j+1]=15;
             }
         }
         WiiULatteVertexOutputs out;
-        if(!wiiu_latte_execute_vertex(vs,vs_size,&inputs,&out)) {
+        WiiULatteVertexFailure failure;
+        const char* capture=getenv("BOTW_CAPTURE_DIR");
+        bool diagnostic=capture && *capture;
+        bool executed=diagnostic?wiiu_latte_execute_vertex_diagnostic(vs,vs_size,&inputs,&out,&failure):
+            wiiu_latte_execute_vertex(vs,vs_size,&inputs,&out);
+        if(!executed) {
+            if(diagnostic)capture_vertex_failure(cpu,vs,vs_size,&inputs,&failure,index,instance);
             scene_rejected("vertex-program",0);goto done;
         }
         memcpy(vertices[i].position,out.position,sizeof(out.position));
@@ -3674,6 +3937,7 @@ static void trace_completed_draw(const char* path,bool wrote,GX2HostColorSurface
     if(yellow?yellow_reported:strtoull(requested,NULL,10)!=g_frame_count)return;
     if(!target)target=find_color_surface(g_current_color_buffers[0],false);
     if(!target)return;
+    if(strcmp(path,"indexed") && strcmp(path,"nonindexed"))g_trace_scene.pending=false;
     if(yellow) {
         if(target->width!=1280 || target->height!=720 || !target->gpu_composited)return;
         size_t size=(size_t)target->width*target->height*4;
@@ -3696,6 +3960,10 @@ static void trace_completed_draw(const char* path,bool wrote,GX2HostColorSurface
             fprintf(stderr,"gx2: yellow-decoded BGRA=%u,%u,%u,%u\n",p[0],p[1],p[2],p[3]);
         }
     }
+    trace_scene_dump(target);
+    g_trace_scene.finished=true;
+    free(g_trace_scene.vertices);g_trace_scene.vertices=NULL;g_trace_scene.capacity=0;
+    free(g_trace_scene.before_pixels);g_trace_scene.before_pixels=NULL;g_trace_scene.before_capacity=0;
     char name[128];snprintf(name,sizeof(name),"draw_%llu_%llu_%s.ppm",
         (unsigned long long)g_frame_count,(unsigned long long)target->draw_serial,path);
     if(dump_surface_ppm(target,name))fprintf(stderr,
@@ -3705,6 +3973,7 @@ static void trace_completed_draw(const char* path,bool wrote,GX2HostColorSurface
 static bool timed_software_draw_texture(CPUState* cpu, u32 primitive,
                                         u32 vertex_count, u32 first_vertex,u32 instances) {
     if(!instances) return false;
+    g_trace_scene.pending=false;
     capture_draw_variant(cpu, primitive, vertex_count, 0u, 0u);
     clock_t start = clock();
     bool wrote=draw_constant_fullscreen_triangle(cpu,primitive,vertex_count,first_vertex,0,0,0);
@@ -3721,6 +3990,7 @@ static bool timed_software_draw_texture(CPUState* cpu, u32 primitive,
 static bool timed_software_draw_indexed_texture(
     CPUState* cpu, u32 primitive, u32 index_count, u32 index_type,
     u32 index_data, s32 index_offset,u32 instances,u32 base_instance) {
+    g_trace_scene.pending=false;
     clock_t start = clock();
     bool wrote=draw_constant_fullscreen_triangle(cpu,primitive,index_count,0,index_type,index_data,index_offset);
     if(!wrote) {
@@ -3737,6 +4007,7 @@ static bool timed_software_draw_indexed_ui(CPUState* cpu, u32 primitive,
                                            u32 index_count, u32 index_type,
                                            u32 index_data,
                                            s32 index_offset) {
+    g_trace_scene.pending=false;
     capture_draw_variant(cpu, primitive, index_count, index_data, index_type);
     clock_t start = clock();
     bool wrote = software_draw_indexed_ui(cpu, primitive, index_count,

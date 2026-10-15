@@ -53,6 +53,7 @@ typedef struct {
     uint64_t serial;
     bool sampler_valid;
     uint32_t sampler_word0;
+    bool floating_pixels; /* RGBA32F instead of the ordinary BGRA8 upload. */
 } WiiUWindowEffectTexture;
 typedef struct {
     const WiiULattePixelProgram* program;

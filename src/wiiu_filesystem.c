@@ -30,6 +30,7 @@ enum {
     FS_MAX_DIRS = 32,
     FS_MAX_PATH = 1024,
     FS_LOG_LIMIT = 160,
+    FS_FILE_TRACE_LIMIT = 4096,
     FS_STATUS_OK = 0,
     FS_STATUS_END = -2,
     FS_STATUS_NOT_FOUND = -6,
@@ -70,6 +71,7 @@ static char g_current_dir[FS_MAX_PATH] = "/vol/content";
 static HostFile g_files[FS_MAX_FILES];
 static HostDir g_dirs[FS_MAX_DIRS];
 static u32 g_fs_log_count;
+static u32 g_file_trace_count;
 static u32 g_asset_open_count;
 static u32 g_asset_missing_count;
 static u32 g_system_asset_missing_count;
@@ -281,6 +283,7 @@ void wiiu_filesystem_reset(void) {
     for (u32 i = 0; i < FS_MAX_DIRS; i++)
         close_dir_slot(&g_dirs[i]);
     g_fs_log_count = 0;
+    g_file_trace_count = 0;
     g_asset_open_count = 0;
     g_asset_missing_count = 0;
     g_system_asset_missing_count = 0;
@@ -597,6 +600,38 @@ static bool read_save_path(CPUState* cpu, u32 slot, u32 address,
     return length >= 0 && (size_t)length < capacity;
 }
 
+/* Keep file-open evidence independent of the shared read/stat log budget.
+   Only guest paths are included; mapped host paths remain private. */
+static void trace_file_open(const char* guest_path, s32 status, u32 handle) {
+    int saved_errno = errno;
+    const char* enabled = getenv("BOTW_TRACE_FILES");
+    if (!enabled || strcmp(enabled, "1") != 0 ||
+        g_file_trace_count >= FS_FILE_TRACE_LIMIT) {
+        errno = saved_errno;
+        return;
+    }
+    char canonical[FS_MAX_PATH];
+    size_t cursor = 0u;
+    const char* source = guest_path && guest_path[0]
+                             ? guest_path : "<invalid-guest-path>";
+    if (source[0] != '/' && source[0] != '\\') {
+        const char* prefix = "/vol/content/";
+        while (*prefix && cursor + 1u < sizeof(canonical))
+            canonical[cursor++] = *prefix++;
+    }
+    for (; *source && cursor + 1u < sizeof(canonical); ++source) {
+        char ch = *source == '\\' ? '/' : *source;
+        if (ch == '/' && cursor != 0u && canonical[cursor - 1u] == '/')
+            continue;
+        canonical[cursor++] = ch;
+    }
+    canonical[cursor] = 0;
+    ++g_file_trace_count;
+    fprintf(stderr, "filesystem-trace: open guest=%s result=%d handle=0x%X\n",
+            canonical, (int)status, handle);
+    errno = saved_errno;
+}
+
 static s32 open_host_file_path(CPUState* cpu, const char* guest_path,
                           u32 guest_mode_address, u32 guest_handle_address) {
     char host_path[FS_MAX_PATH];
@@ -605,6 +640,7 @@ static s32 open_host_file_path(CPUState* cpu, const char* guest_path,
     if (!map_guest_path(guest_path, host_path, sizeof(host_path)) ||
         !read_guest_string(cpu, guest_mode_address, guest_mode,
                            sizeof(guest_mode))) {
+        trace_file_open(guest_path, FS_STATUS_NOT_FOUND, 0u);
         return FS_STATUS_NOT_FOUND;
     }
 
@@ -638,7 +674,9 @@ static s32 open_host_file_path(CPUState* cpu, const char* guest_path,
                     "%s\n",
                     host_path);
         }
-        return errno == ENOENT ? FS_STATUS_NOT_FOUND : FS_STATUS_ACCESS_ERROR;
+        s32 status = errno == ENOENT ? FS_STATUS_NOT_FOUND : FS_STATUS_ACCESS_ERROR;
+        trace_file_open(guest_path, status, 0u);
+        return status;
     }
 
     for (u32 i = 0; i < FS_MAX_FILES; i++) {
@@ -651,18 +689,22 @@ static s32 open_host_file_path(CPUState* cpu, const char* guest_path,
             fprintf(stderr, "filesystem: opened %s -> handle=0x%X\n",
                     guest_path, FS_FILE_HANDLE_BASE + i);
         g_asset_open_count++;
+        trace_file_open(guest_path, FS_STATUS_OK, FS_FILE_HANDLE_BASE + i);
         return FS_STATUS_OK;
     }
 
     fclose(stream);
+    trace_file_open(guest_path, FS_STATUS_STORAGE_FULL, 0u);
     return FS_STATUS_STORAGE_FULL;
 }
 
 static s32 open_host_file(CPUState* cpu, u32 guest_path_address,
                           u32 guest_mode_address, u32 guest_handle_address) {
     char path[FS_MAX_PATH];
-    if (!read_guest_string(cpu, guest_path_address, path, sizeof(path)))
+    if (!read_guest_string(cpu, guest_path_address, path, sizeof(path))) {
+        trace_file_open(NULL, FS_STATUS_NOT_FOUND, 0u);
         return FS_STATUS_NOT_FOUND;
+    }
     return open_host_file_path(cpu, path, guest_mode_address, guest_handle_address);
 }
 

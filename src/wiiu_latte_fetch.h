@@ -49,6 +49,9 @@ typedef struct {
     u8 valid[WIIU_LATTE_FETCH_MAX_GPRS];
     u32 fetched_count;
     u32 failed_count;
+    /* UI consumers retain numeric floats; native shader execution needs the
+       original integer bits, including values above float's exact range. */
+    u32 words[WIIU_LATTE_FETCH_MAX_GPRS][4];
 } WiiULatteFetchedVertex;
 
 bool wiiu_latte_fetch_format_info(u32 gx2_format,

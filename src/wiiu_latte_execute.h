@@ -21,6 +21,10 @@ typedef struct {
         float u,float v,float lod,float result[4]);
     void* texture_user;
     bool (*texture_info)(void* user,unsigned texture,uint32_t lod,uint32_t result[4]);
+    /* Z is an unnormalized layer for a 2D array. Preserve it rather than
+       silently sampling layer zero through the legacy 2D callback. */
+    bool (*sample_texture_layer)(void* user,unsigned texture,unsigned sampler,
+        float u,float v,float layer,float lod,float result[4]);
 } WiiULatteVertexInputs;
 
 typedef struct {
@@ -30,6 +34,16 @@ typedef struct {
     uint8_t parameter_mask[32];
 } WiiULatteVertexOutputs;
 
+/* First rejection only. UINT32_MAX marks context not reached by execution. */
+typedef struct {
+    uint32_t line, cf_slot, instruction_slot, word0, word1, opcode;
+    uint32_t source_index, source_select, source_channel, detail0, detail1;
+    char reason[96];
+} WiiULatteVertexFailure;
+
 bool wiiu_latte_execute_vertex(const uint8_t* program, size_t size,
     const WiiULatteVertexInputs* inputs, WiiULatteVertexOutputs* outputs);
+bool wiiu_latte_execute_vertex_diagnostic(const uint8_t* program, size_t size,
+    const WiiULatteVertexInputs* inputs, WiiULatteVertexOutputs* outputs,
+    WiiULatteVertexFailure* failure);
 #endif

@@ -49,6 +49,12 @@ endif()
 
 
 if(BUILD_TESTING)
+    add_executable(botw_latte_vertex_failure_replay tools/latte_vertex_failure_replay.c)
+    target_link_libraries(botw_latte_vertex_failure_replay PRIVATE botw_graphics)
+    add_test(NAME botw_latte_failure_context COMMAND botw_latte_vertex_failure_replay --self-test)
+    set_tests_properties(botw_latte_failure_context PROPERTIES
+        ENVIRONMENT "BOTW_HEADLESS=1;BOTW_MUTE=1"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:botw_graphics>")
     add_executable(botw_graphics_config_test tools/graphics_config_test.c src/botw_graphics_config.c)
     target_include_directories(botw_graphics_config_test PRIVATE src)
     add_test(NAME botw_graphics_config COMMAND botw_graphics_config_test)
@@ -66,7 +72,7 @@ if(BUILD_TESTING)
             ENVIRONMENT "BOTW_HEADLESS=1;BOTW_WINDOW_WIDTH=640;BOTW_WINDOW_HEIGHT=360;BOTW_VSYNC=1;BOTW_PRESENT_FILTER=nearest"
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:botw_graphics>")
     endif()
-    foreach(tool botw_graphics_config_test botw_presentation_test botw_shader_override_test)
+    foreach(tool botw_graphics_config_test botw_presentation_test botw_shader_override_test botw_latte_vertex_failure_replay)
         if(TARGET ${tool})
             set_target_properties(${tool} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${BOTW_OUTPUT_ROOT}/tools")
             foreach(configuration Debug Release RelWithDebInfo MinSizeRel)

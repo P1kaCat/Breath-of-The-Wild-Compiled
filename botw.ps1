@@ -4,6 +4,8 @@ param(
     [string]$WorkRoot = (Join-Path $PSScriptRoot 'workspace'),
     [string]$BuildRoot = '',
     [string]$PrecompiledObjects = '',
+    [ValidateSet('Auto','Visual Studio 17 2022','Ninja')]
+    [string]$Generator = 'Auto',
     [switch]$RecompileGenerated,
     [ValidateRange(1,16)][int]$Jobs = 4,
     [ValidateRange(320,7680)][int]$Width = 1280,
@@ -28,6 +30,9 @@ $update = Join-Path $WorkRoot 'game\update'
 $dlc = Join-Path $WorkRoot 'game\dlc'
 $generated = Join-Path $WorkRoot 'recomp\generated'
 $translator = Join-Path $WorkRoot 'translator\dolrecomp\Release\dolrecomp.exe'
+if (-not (Test-Path -LiteralPath $translator)) {
+    $translator = Join-Path $WorkRoot 'translator\dolrecomp\dolrecomp.exe'
+}
 $buildStatePath = Join-Path $WorkRoot 'native-build.json'
 if (-not $BuildRoot -and (Test-Path -LiteralPath $buildStatePath)) {
     $buildState = Get-Content -LiteralPath $buildStatePath -Raw | ConvertFrom-Json
@@ -56,8 +61,31 @@ function Assert-GameInputs {
     Write-Host "RPX verified: $hash"
 }
 function Configure-Host([string]$Source, [string]$Build, [string[]]$Extra) {
-    $toolset = if (Test-Path -LiteralPath (Join-Path $Build 'CMakeCache.txt')) { @() } else { @('-T','host=x64') }
-    Invoke-Checked 'cmake' (@('-S',$Source,'-B',$Build,'-G','Visual Studio 17 2022','-A','x64') + $toolset + $Extra)
+    $cache = Join-Path $Build 'CMakeCache.txt'
+    $selected = $Generator
+    if (Test-Path -LiteralPath $cache) {
+        $entry = Select-String -LiteralPath $cache -Pattern '^CMAKE_GENERATOR:INTERNAL=(.+)$' | Select-Object -First 1
+        if ($entry) {
+            $existing = $entry.Matches[0].Groups[1].Value
+            if ($Generator -ne 'Auto' -and $Generator -ne $existing) {
+                throw 'This build directory uses another generator. Select a fresh BuildRoot.'
+            }
+            $selected = $existing
+        }
+    }
+    if ($selected -eq 'Auto') { $selected = 'Visual Studio 17 2022' }
+    if ($selected -eq 'Ninja') {
+        Invoke-Checked 'cmake' (@('-S',$Source,'-B',$Build,'-G','Ninja','-DCMAKE_BUILD_TYPE=Release') + $Extra)
+    } else {
+        $toolset = if (Test-Path -LiteralPath $cache) { @() } else { @('-T','host=x64') }
+        Invoke-Checked 'cmake' (@('-S',$Source,'-B',$Build,'-G',$selected,'-A','x64') + $toolset + $Extra)
+    }
+}
+function Build-Host([string]$Build, [string[]]$Extra = @()) {
+    $native = if (Select-String -LiteralPath (Join-Path $Build 'CMakeCache.txt') -Pattern '^CMAKE_GENERATOR:INTERNAL=Visual Studio ' -Quiet) {
+        @('--','/p:PreferredToolArchitecture=x64')
+    } else { @() }
+    Invoke-Checked 'cmake' (@('--build',$Build,'--config','Release','--parallel',"$Jobs") + $Extra + $native)
 }
 
 if ($Action -eq 'doctor') {
@@ -72,7 +100,9 @@ if ($Action -eq 'doctor') {
         & $vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     } else { '' }
     if ($cppInstallation) { Write-Host "Visual Studio 2022 C++ : $cppInstallation" }
-    else { Write-Host 'Visual Studio 2022 C++ : MISSING (required to rebuild; existing binaries can still run).' }
+    else { Write-Host 'Visual Studio 2022 C++ installation : MISSING. Ninja can also use an initialized MSVC build environment.' }
+    $compiler = Get-Command cl -ErrorAction SilentlyContinue
+    if ($compiler) { Write-Host "MSVC build environment : $($compiler.Source)" }
     Write-Host "Builds / copied game data: $WorkRoot"
     Write-Host "Native build: $gameBuild"
     Write-Host "Translator built: $(Test-Path -LiteralPath $translator)"
@@ -91,13 +121,13 @@ try {
     switch ($Action) {
         'components' {
             Configure-Host $PSScriptRoot $componentBuild @('-DBOTW_BUILD_GAME=OFF')
-            Invoke-Checked 'cmake' @('--build',$componentBuild,'--config','Release','--parallel',"$Jobs",'--','/p:PreferredToolArchitecture=x64')
+            Build-Host $componentBuild
             Invoke-Checked 'ctest' @('--test-dir',$componentBuild,'-C','Release','--output-on-failure')
         }
         'translator' {
             $build = Join-Path $WorkRoot 'translator'
             Configure-Host (Join-Path $PSScriptRoot 'cmake\Translator') $build @()
-            Invoke-Checked 'cmake' @('--build',$build,'--config','Release','--target','dolrecomp','--parallel',"$Jobs",'--','/p:PreferredToolArchitecture=x64')
+            Build-Host $build @('--target','dolrecomp')
         }
         'generate' {
             Assert-GameInputs
@@ -122,7 +152,7 @@ try {
             }
             $objectCache = if ($RecompileGenerated) { @('-DBOTW_PRECOMPILED_OBJECT_DIR=') } elseif ($PrecompiledObjects) { @("-DBOTW_PRECOMPILED_OBJECT_DIR=$PrecompiledObjects") } else { @() }
             Configure-Host $PSScriptRoot $gameBuild (@('-DBOTW_BUILD_GAME=ON',"-DBOTW_COMPILE_JOBS=$Jobs","-DGENERATED_DIR=$generated","-DBOTW_BASE_TITLE_DIR=$base","-DBOTW_UPDATE_TITLE_DIR=$update","-DBOTW_DLC_TITLE_DIR=$dlc","-DBOTW_GAME_TITLE_ID=$titleId","-DBOTW_GAME_GROUP_ID=$groupId","-DBOTW_GAME_REGION=$region") + $objectCache)
-            Invoke-Checked 'cmake' @('--build',$gameBuild,'--config','Release','--parallel',"$Jobs",'--','/p:PreferredToolArchitecture=x64')
+            Build-Host $gameBuild
             @{ build_root=$gameBuild } | ConvertTo-Json | Set-Content -LiteralPath $buildStatePath -Encoding utf8
         }
         'test' {

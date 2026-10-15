@@ -339,13 +339,22 @@ static int run_with_guest_threads(CPUState* cpu, u32 max_blocks) {
     /* Blocked/sleeping workers now leave the runnable set. Give the remaining
        workers enough dispatches to complete jobs while main polls game-level
        completion flags as well as OS events. */
-    const u32 startup_worker_slice = 32u;
+    u32 worker_budget = 32u;
+    const char* worker_budget_text = getenv("BOTW_WORKER_SLICE");
+    if (worker_budget_text && *worker_budget_text) {
+        char* end;
+        unsigned long requested = strtoul(worker_budget_text, &end, 10);
+        if (!*end && requested >= 1u && requested <= 256u) worker_budget = (u32)requested;
+        else fprintf(stderr, "runner: invalid BOTW_WORKER_SLICE; using 32\n");
+        fprintf(stderr, "runner: cooperative worker budget=%u (lock fairness overrides retained)\n", worker_budget);
+    }
+    const u32 startup_worker_slice = worker_budget;
     const u32 runtime_main_slice = 32u;
     /* A title frame is not a loading-complete signal. Resource preparation
        continues behind it; keep the startup worker budget instead of cutting
        it to a quarter as soon as a splash/title image reaches scan-out. */
-    const u32 runtime_worker_slice = 32u;
-    const u32 waiting_main_worker_slice = 32u;
+    const u32 runtime_worker_slice = worker_budget;
+    const u32 waiting_main_worker_slice = worker_budget;
     u32 event_wait_address = 0u;
     const u32 progress_interval = trace_performance ? 8000u : 1000000u;
     const u32 perf_interval = 4000u;

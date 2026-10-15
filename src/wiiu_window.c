@@ -129,6 +129,7 @@ typedef struct {
     uint64_t use_serial;
     ID3D11Texture2D* texture;
     ID3D11ShaderResourceView* view;
+    bool floating_pixels;
 } NativeGpuTexture;
 
 typedef struct {
@@ -742,8 +743,8 @@ static uint16_t native_unorm8_to_half(uint8_t value) {
     return (uint16_t)((((bits>>23)-112)<<10)+(mantissa>>13));
 }
 
-static NativeGpuTexture* native_gpu_ensure_texture(
-    const uint8_t* source, uint32_t width, uint32_t height, uint64_t serial) {
+static NativeGpuTexture* native_gpu_ensure_texture_kind(
+    const uint8_t* source, uint32_t width, uint32_t height, uint64_t serial,bool floating_pixels) {
     if (!g_d3d_ready || !source || width == 0u || height == 0u)
         return NULL;
 
@@ -751,7 +752,7 @@ static NativeGpuTexture* native_gpu_ensure_texture(
         NativeGpuTexture* texture = &g_native_gpu_textures[i];
         if (texture->valid && texture->source == source &&
             texture->serial == serial && texture->width == width &&
-            texture->height == height) {
+            texture->height == height && texture->floating_pixels==floating_pixels) {
             texture->use_serial = ++g_native_gpu_use_serial;
             return texture;
         }
@@ -777,14 +778,14 @@ static NativeGpuTexture* native_gpu_ensure_texture(
     desc.Height = height;
     desc.MipLevels = 1u;
     desc.ArraySize = 1u;
-    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.Format = floating_pixels?DXGI_FORMAT_R32G32B32A32_FLOAT:DXGI_FORMAT_B8G8R8A8_UNORM;
     desc.SampleDesc.Count = 1u;
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     D3D11_SUBRESOURCE_DATA data;
     memset(&data, 0, sizeof(data));
     data.pSysMem = source;
-    data.SysMemPitch = width * 4u;
+    data.SysMemPitch = width * (floating_pixels?16u:4u);
     HRESULT result = ID3D11Device_CreateTexture2D(g_d3d_device, &desc, &data,
                                                     &replacement->texture);
     if (FAILED(result))
@@ -799,12 +800,17 @@ static NativeGpuTexture* native_gpu_ensure_texture(
     replacement->serial = serial;
     replacement->width = width;
     replacement->height = height;
+    replacement->floating_pixels=floating_pixels;
     replacement->use_serial = ++g_native_gpu_use_serial;
     return replacement;
 
 failed:
     native_gpu_release_texture(replacement);
     return NULL;
+}
+static NativeGpuTexture* native_gpu_ensure_texture(
+    const uint8_t* source,uint32_t width,uint32_t height,uint64_t serial) {
+    return native_gpu_ensure_texture_kind(source,width,height,serial,false);
 }
 
 static bool native_gpu_blend_controls_match(
@@ -1780,7 +1786,7 @@ static bool native_draw_postprocess(uint32_t target_key,uint32_t width,
                 } else {
                     const WiiUWindowEffectTexture* input=&scene->textures[i];
                     if(!input->pixels)return false;
-                    NativeGpuTexture* texture=native_gpu_ensure_texture(input->pixels,input->width,input->height,input->serial);
+                    NativeGpuTexture* texture=native_gpu_ensure_texture_kind(input->pixels,input->width,input->height,input->serial,input->floating_pixels);
                     if(!texture)return false;
                     views[i]=texture->view;
                 }

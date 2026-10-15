@@ -79,6 +79,23 @@ int main(int argc,char** argv) {
     CHECK(wiiu_window_gpu_draw_scene(99,8,8,&material,v,3,viewport,&blend,false,0,0,0,0));
     CHECK(wiiu_window_gpu_readback(99,pixels,8,8,32));
     CHECK(!memcmp(pixels+(8+1)*4,tex,4));CHECK(pixels[(5*8+5)*4+2]==0);
+    /* Numeric guest textures must survive an actual shader sample with HDR
+       and signed components. Cache identity includes the uploaded type. */
+    float hdr_tex[4]={16,-2,.125f,.5f},hdr_pixels[256];
+    material.textures[4]=(WiiUWindowEffectTexture){(const uint8_t*)hdr_tex,1,1,202};
+    material.textures[4].floating_pixels=true;
+    CHECK(wiiu_window_gpu_configure(99,8,8,0x823));
+    CHECK(wiiu_window_gpu_clear(99,8,8,0,0,0,0));
+    CHECK(wiiu_window_gpu_draw_scene(99,8,8,&material,v,3,viewport,&blend,false,0,0,0,0));
+    CHECK(wiiu_window_gpu_readback_float(99,hdr_pixels,8,8));
+    for(unsigned c=0;c<4;++c)CHECK(hdr_pixels[(8+1)*4+c]==hdr_tex[c]);
+    material.textures[4].floating_pixels=false; /* same pointer/serial, different type */
+    CHECK(wiiu_window_gpu_draw_scene(99,8,8,&material,v,3,viewport,&blend,false,0,0,0,0));
+    CHECK(wiiu_window_gpu_readback_float(99,hdr_pixels,8,8));
+    CHECK(fabsf(hdr_pixels[(8+1)*4]-128/255.0f)<.00001f);
+    material.textures[4]=(WiiUWindowEffectTexture){tex,1,1,201};
+    CHECK(wiiu_window_gpu_configure(99,8,8,0x1a));
+    CHECK(wiiu_window_gpu_clear(99,8,8,0,0,0,255));
     CHECK(wiiu_window_gpu_upload_bgra(100,1,1,tex,4));
     material.source_surfaces[4]=100;material.textures[4].pixels=NULL;
     material.constants[4][0]=2;material.constants[4][2]=0;

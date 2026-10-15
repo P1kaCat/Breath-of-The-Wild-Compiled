@@ -28,6 +28,7 @@ bool wiiu_gx2_software_sample_bgra(const u8* pixels,const WiiUGX2TextureView* te
     u32 sampler_word,float u,float v,float result[4]);
 bool wiiu_gx2_software_sample_rgba_float(const float* pixels,const WiiUGX2TextureView* texture,
     u32 sampler_word,float u,float v,float result[4]);
+bool wiiu_gx2_software_decode_float(CPUState* cpu,const WiiUGX2TextureView* texture,float* rgba);
 
 bool wiiu_gx2_software_blit(CPUState* cpu,
                             const WiiUGX2TextureView* texture,
